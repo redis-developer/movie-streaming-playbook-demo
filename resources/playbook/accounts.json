@@ -1,0 +1,102 @@
+{
+  "accounts": [
+    {
+      "accountId": "SF-48213",
+      "name": "Priya N.",
+      "plan": "Standard",
+      "paymentMethod": "Visa ending 4421",
+      "memberSince": "2024-03-11",
+      "region": "US",
+      "refund": {
+        "refundId": "RF-2026-10311",
+        "amount": "15.99",
+        "currency": "USD",
+        "status": "processing",
+        "reason": "Accidental annual upgrade",
+        "requestedAt": "2026-10-30",
+        "approvedAt": "2026-10-31",
+        "expectedBy": "2026-11-07",
+        "channel": "original payment method"
+      },
+      "stream": {
+        "device": "Samsung Smart TV (Tizen 7)",
+        "appVersion": "9.4.1",
+        "measuredBandwidthMbps": "3.1",
+        "lastErrorCode": "SF-PLAY-0042",
+        "lastErrorAt": "2026-11-03T21:14:00Z",
+        "currentQuality": "SD (480p)"
+      }
+    },
+    {
+      "accountId": "SF-77102",
+      "name": "Marcus O.",
+      "plan": "Premium",
+      "paymentMethod": "PayPal",
+      "memberSince": "2022-08-02",
+      "region": "UK",
+      "refund": {
+        "refundId": "RF-2026-10288",
+        "amount": "19.99",
+        "currency": "GBP",
+        "status": "issued",
+        "reason": "Duplicate charge",
+        "requestedAt": "2026-10-26",
+        "approvedAt": "2026-10-27",
+        "issuedAt": "2026-10-28",
+        "channel": "PayPal balance"
+      },
+      "stream": {
+        "device": "Apple TV 4K",
+        "appVersion": "9.4.1",
+        "measuredBandwidthMbps": "48.0",
+        "lastErrorCode": "",
+        "lastErrorAt": "",
+        "currentQuality": "4K HDR"
+      }
+    },
+    {
+      "accountId": "SF-30555",
+      "name": "Dana K.",
+      "plan": "Basic",
+      "paymentMethod": "Mastercard ending 0098",
+      "memberSince": "2026-09-14",
+      "region": "CA",
+      "refund": {
+        "refundId": "RF-2026-10302",
+        "amount": "9.99",
+        "currency": "CAD",
+        "status": "denied",
+        "reason": "Change of mind",
+        "requestedAt": "2026-10-29",
+        "decidedAt": "2026-10-30",
+        "denialCode": "OUTSIDE-WINDOW",
+        "channel": "n/a"
+      },
+      "stream": {
+        "device": "Chrome 131 on Windows",
+        "appVersion": "web",
+        "measuredBandwidthMbps": "12.5",
+        "lastErrorCode": "SF-PLAY-0117",
+        "lastErrorAt": "2026-11-04T08:02:00Z",
+        "currentQuality": "HD (720p)"
+      }
+    },
+    {
+      "accountId": "SF-61940",
+      "name": "Tomás R.",
+      "plan": "Standard",
+      "paymentMethod": "Visa ending 7710",
+      "memberSince": "2023-01-20",
+      "region": "ES",
+      "refund": null,
+      "stream": {
+        "device": "iPhone 15 (iOS 19)",
+        "appVersion": "9.3.8",
+        "measuredBandwidthMbps": "6.0",
+        "lastErrorCode": "SF-PLAY-0203",
+        "lastErrorAt": "2026-11-04T07:40:00Z",
+        "currentQuality": "HD (720p)"
+      }
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+# Profile for the `iris` CLI (content publishing and inspection). URLs only; credentials come from
+# env files:  .env (IRIS_AGENT_PLAYBOOKS_URL / _PLAYBOOK_ID / _API_KEY for the running agent)
+#             .env.content (IRIS_AGENT_PLAYBOOKS_CONTENT_API_KEY for publishing).
+# Select with:  IRIS_CONFIG=./iris.toml IRIS_PROFILE=cloud
+[profiles.cloud]
+kind = "cloud"
+console_url = "https://cloud.redis.io"
+
+[profiles.cloud.agent_playbooks]
+url = "https://playbook.public.jgh1h0nphvutbazo.mgmt-0.aws-use1-1.ultra.redis.io"

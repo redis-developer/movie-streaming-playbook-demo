@@ -1,0 +1,49 @@
+services:
+  # RIOT - Redis Input/Output Tools (one-time CLI tool)
+  # Pulled with: docker-compose --profile tools pull
+  # Run with: docker-compose --profile tools run --rm riot <command>
+  riot:
+    image: riotx/riot:latest
+    profiles: ["tools"]  # Won't start with 'docker-compose up'
+    volumes:
+      - ./resources:/data
+
+  # Backend FastAPI service
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8000:8000"
+    # Values come from the shell or from playbook-chatbot/.env (Compose reads it for interpolation).
+    environment:
+      - REDIS_URL=${REDIS_URL}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - LLM_MODEL=${LLM_MODEL:-gpt-4o-mini}
+      - PLAYBOOK_MODE=${PLAYBOOK_MODE:-auto}
+      - IRIS_AGENT_PLAYBOOKS_URL=${IRIS_AGENT_PLAYBOOKS_URL:-}
+      - IRIS_AGENT_PLAYBOOKS_PLAYBOOK_ID=${IRIS_AGENT_PLAYBOOKS_PLAYBOOK_ID:-}
+      - IRIS_AGENT_PLAYBOOKS_API_KEY=${IRIS_AGENT_PLAYBOOKS_API_KEY:-}
+      - PLAYBOOK_NAME=${PLAYBOOK_NAME:-StreamFlix Support}
+      - AGENT_FAQ_MIN_SCORE=${AGENT_FAQ_MIN_SCORE:-}
+      - AGENT_SKILL_MIN_SCORE=${AGENT_SKILL_MIN_SCORE:-}
+      - EXTRACTION_MIN_SESSIONS=${EXTRACTION_MIN_SESSIONS:-3}
+    volumes:
+      - ./resources:/app/resources
+    healthcheck:
+      # python:3.11-slim has no curl; probe with the interpreter instead
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health', timeout=8)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+  # Frontend React service
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend

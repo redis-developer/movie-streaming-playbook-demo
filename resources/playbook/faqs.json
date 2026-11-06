@@ -1,0 +1,66 @@
+[
+  {
+    "entryKey": "plan-change-timing",
+    "intents": ["when does a plan change apply", "upgrade downgrade effective date"],
+    "attributes": {"topic": "account", "audience": "customer"},
+    "versions": [
+      {
+        "question": "When does a plan change take effect?",
+        "answer": "Plan changes take effect at the start of your next billing cycle. If you upgrade, you may be charged a prorated amount immediately so you can use the new plan right away. Downgrades always apply at renewal, so you keep your current plan until then."
+      }
+    ],
+    "publish": 1
+  },
+  {
+    "entryKey": "household-sharing",
+    "intents": ["share account outside household", "extra member", "password sharing rules"],
+    "attributes": {"topic": "account", "audience": "customer"},
+    "versions": [
+      {
+        "question": "Can I share my StreamFlix account with people outside my household?",
+        "answer": "Your account is for you and the people you live with. Standard plans stream on 2 devices at once and Premium on 4. To share with someone outside your household, add them as an Extra Member for $7.99/month; they get their own profile and login tied to your plan."
+      },
+      {
+        "question": "Can I share my StreamFlix account with people outside my household?",
+        "answer": "Your account is for you and the people you live with. Standard plans stream on 2 devices at once and Premium on 4. To share with someone outside your household, add them as an Extra Member for $8.99/month (price effective December 1, 2026). Extra Members can be added from Account Settings > Manage Household and must activate within 7 days."
+      }
+    ],
+    "publish": 1
+  },
+  {
+    "entryKey": "download-limits",
+    "intents": ["how many downloads", "offline download limit"],
+    "attributes": {"topic": "content", "audience": "customer"},
+    "versions": [
+      {
+        "question": "How many titles can I download for offline viewing?",
+        "answer": "You can keep up to 100 downloads per device, on up to 2 devices on Standard and 6 devices on Premium. Downloads expire 30 days after you save them, or 48 hours after you first press play. Some titles can only be downloaded a limited number of times per year because of licensing."
+      }
+    ],
+    "publish": 1
+  },
+  {
+    "entryKey": "free-trial-eligibility",
+    "intents": ["am I eligible for a free trial", "trial for returning members"],
+    "attributes": {"topic": "billing", "audience": "customer"},
+    "versions": [
+      {
+        "question": "Who is eligible for a free trial?",
+        "answer": "Free trials are for new members only: one trial per household and payment method. Returning members and anyone who has used a trial before are not eligible. A trial converts to a paid plan automatically on day 8 unless you cancel first; we send a reminder email two days before."
+      }
+    ],
+    "publish": 1
+  },
+  {
+    "entryKey": "cancel-access-end",
+    "intents": ["when does access end after cancelling", "cancel subscription still watch"],
+    "attributes": {"topic": "account", "audience": "customer"},
+    "versions": [
+      {
+        "question": "If I cancel, when does my access end?",
+        "answer": "You keep full access until the end of the billing period you have already paid for. You are not charged again, and you can resubscribe at any time. Your profiles, watchlist and viewing history are kept for 12 months after cancellation."
+      }
+    ],
+    "publish": 1
+  }
+]

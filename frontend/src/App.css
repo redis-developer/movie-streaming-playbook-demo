@@ -1,0 +1,139 @@
+.app {
+  min-height: 100vh;
+  padding: 0;
+}
+
+/* Navigation */
+.app-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1.5rem;
+  background: var(--surface, #1a1a2e);
+  border-bottom: 1px solid var(--border, rgba(255, 255, 255, 0.1));
+  flex-wrap: wrap;
+}
+
+.nav-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.nav-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 9px;
+  background: linear-gradient(135deg, #e50914, #b20710);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 800;
+  font-size: 0.8rem;
+  letter-spacing: 0.5px;
+}
+
+.nav-title {
+  font-weight: 700;
+  color: var(--text-primary, #fff);
+}
+
+.nav-powered {
+  font-size: 0.8rem;
+  color: #ff6b6b;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid rgba(229, 9, 20, 0.4);
+  border-radius: 999px;
+}
+
+.nav-links {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.nav-btn {
+  position: relative;
+  padding: 0.6rem 1.2rem;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary, #8e8e9a);
+  font-size: 0.9375rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.nav-btn:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #ffffff);
+}
+
+.nav-btn.active {
+  background: linear-gradient(135deg, #e50914, #b20710);
+  color: white;
+}
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  margin-left: 0.5rem;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: #f39c12;
+  color: #1a1a2e;
+  font-size: 0.7rem;
+  font-weight: 700;
+}
+
+.nav-status {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.mode-pill {
+  font-size: 0.72rem;
+  padding: 0.25rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text-secondary, #8e8e9a);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.mode-pill.embedded,
+.mode-pill.llm {
+  border-color: rgba(46, 204, 113, 0.4);
+  color: #2ecc71;
+}
+
+.mode-pill.remote {
+  border-color: rgba(52, 152, 219, 0.5);
+  color: #5dade2;
+}
+
+.mode-pill.offline {
+  border-color: rgba(243, 156, 18, 0.5);
+  color: #f5b041;
+}
+
+.error-banner {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  border-radius: 12px;
+  padding: 1rem 1.5rem;
+  margin-bottom: 1rem;
+  color: #fca5a5;
+}
+
+@media (max-width: 768px) {
+  .nav-powered,
+  .nav-status {
+    display: none;
+  }
+}

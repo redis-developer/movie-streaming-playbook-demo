@@ -1,0 +1,26 @@
+# FastAPI and server
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-dotenv>=1.0.0
+
+# Redis and vector search
+redis>=5.0.0
+redisvl>=0.4.0
+
+# ML/Embeddings
+sentence-transformers>=2.2.0
+torch>=2.0.0
+
+# Utilities
+pydantic>=2.0.0
+requests>=2.31.0
+pyyaml>=6.0
+
+# Token estimation for the Playbook discovery budget (o200k_base, as the service uses)
+tiktoken>=0.7.0
+
+# LLM (OpenAI tool calling for Skill execution)
+openai>=1.0.0
+
+# Redis Iris SDK (remote Playbook mode: redis_iris.agent_playbooks + the generated redis_agent_playbook client)
+redis-iris>=1.0.1
