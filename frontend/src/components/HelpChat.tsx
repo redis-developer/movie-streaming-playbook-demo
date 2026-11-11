@@ -15,6 +15,20 @@ export function HelpChat({ suggestions, discoveryLimit, pins, onResponse }: Help
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const [memoryOwner] = useState(() => {
+    const existing = localStorage.getItem('streamflix-memory-owner');
+    if (existing) return existing;
+    const created = `web-${crypto.randomUUID()}`;
+    localStorage.setItem('streamflix-memory-owner', created);
+    return created;
+  });
+  const [memorySession] = useState(() => {
+    const existing = sessionStorage.getItem('streamflix-memory-session');
+    if (existing) return existing;
+    const created = `chat-${crypto.randomUUID()}`;
+    sessionStorage.setItem('streamflix-memory-session', created);
+    return created;
+  });
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -31,7 +45,12 @@ export function HelpChat({ suggestions, discoveryLimit, pins, onResponse }: Help
     setInput('');
     setIsLoading(true);
     try {
-      const response = await helpChat(text, { discovery_limit: discoveryLimit, pins });
+      const response = await helpChat(text, {
+        discovery_limit: discoveryLimit,
+        pins,
+        user_id: memoryOwner,
+        memory_session_id: memorySession,
+      });
       setMessages((prev) => [...prev, { id: (Date.now() + 1).toString(), role: 'assistant', content: response.answer, timestamp: new Date().toISOString(), response }]);
       onResponse?.(response);
     } catch (error) {
@@ -181,7 +200,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 // -------------------------------------------------------------------- trace
 const STEP_ICONS: Record<string, string> = {
   guardrail: '🛡', discover: '🔎', route: '↪', faq: '📘', load_skill: '🧩', fetch_resource: '📄', tool: '⚙', llm: '🤖',
-  offline_runner: '🧭', answer: '✅', rag: '📚', propose: '💡',
+  offline_runner: '🧭', answer: '✅', rag: '📚', propose: '💡', memory_recall: '🧠', memory_record: '💾',
 };
 
 function TraceList({ steps }: { steps: TraceStep[] }) {

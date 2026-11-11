@@ -69,6 +69,29 @@ reads `playbook-chatbot/.env` for the values it passes through, so put `REDIS_UR
 Seed from the Studio or with `curl -X POST localhost:8000/api/playbook/seed`, and stop with
 `docker compose down`.
 
+### Agent Memory
+
+The Help Center can recall long-term user memories before every answer and record
+the accepted user/assistant exchange afterward. Configure an existing Redis Agent
+Memory service alongside the Playbook settings:
+
+```bash
+IRIS_AGENT_MEMORY_URL=https://<agent-memory public data-plane origin>
+IRIS_AGENT_MEMORY_STORE_ID=st_<32 hex>
+IRIS_AGENT_MEMORY_API_KEY=<agent key with read and write access to the store>
+```
+
+The browser keeps a stable owner ID in `localStorage` and a conversation ID in
+`sessionStorage`; API clients can pass `user_id` and `memory_session_id` to
+`POST /api/help/chat`. Relevant memories are added to model-backed RAG and Skill
+prompts, but never override published FAQs, approved Skill instructions, or live
+tool data. Memory failures fail open and are visible in the response trace.
+
+When Agent Memory is configured, the demo disables its legacy in-process FAQ
+proposer. Configure **Automatic FAQ extraction** on the Playbook to read this
+Memory store; the Playbook worker then creates reviewable FAQ proposals from idle
+conversations. It does not create Skill proposals.
+
 ### With or without an OpenAI key
 
 | | `OPENAI_API_KEY` set | not set (offline mode) |

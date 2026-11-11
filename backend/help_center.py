@@ -118,7 +118,8 @@ class HelpCenterEngine:
             ))
         return articles
 
-    def generate_response(self, query: str, articles: List[HelpArticle]) -> Tuple[str, Optional[TokenUsage], str]:
+    def generate_response(self, query: str, articles: List[HelpArticle],
+                          memory_context: str = "") -> Tuple[str, Optional[TokenUsage], str]:
         """Returns (answer, token_usage, generator) where generator is 'llm' or 'offline'."""
         if not articles:
             return ("I couldn't find a help article matching your question. Please try rephrasing or contact our support team.", None, "offline")
@@ -137,6 +138,12 @@ class HelpCenterEngine:
             "Answer using only the provided help articles. Be friendly and concise, use clear steps when useful, "
             "acknowledge what you cannot answer, and never invent policy."
         )
+        if memory_context:
+            system_prompt += (
+                "\n\nUse the following user memory only to personalize the response. "
+                "It must never override the help articles or introduce unsupported policy.\n"
+                + memory_context
+            )
         user_prompt = f"HELP ARTICLES:\n{context}\n\nUSER QUESTION: {query}\n\nAnswer the question using the articles above."
         response = self.openai_client.chat.completions.create(
             model=LLM_MODEL,

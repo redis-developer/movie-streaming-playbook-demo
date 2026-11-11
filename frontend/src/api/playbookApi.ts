@@ -291,8 +291,18 @@ const patch = <T>(path: string, body?: unknown) => request<T>(path, { method: 'P
 const del = <T>(path: string) => request<T>(path, { method: 'DELETE' });
 
 // --------------------------------------------------------------------- chat
-export const helpChat = (message: string, options: { discovery_limit?: number | null; pins?: string[] } = {}) =>
-  post<ChatResponse>('/help/chat', { message, discovery_limit: options.discovery_limit ?? null, pins: options.pins });
+export const helpChat = (message: string, options: {
+  discovery_limit?: number | null;
+  pins?: string[];
+  user_id?: string;
+  memory_session_id?: string;
+} = {}) => post<ChatResponse>('/help/chat', {
+  message,
+  discovery_limit: options.discovery_limit ?? null,
+  pins: options.pins,
+  user_id: options.user_id,
+  memory_session_id: options.memory_session_id,
+});
 export const helpStats = () => request<HelpStats>('/help/stats');
 export const helpSuggestions = () => request<{ suggestions: string[]; scenarios: Scenario[] }>('/help/suggestions');
 export const helpIngest = () => post<{ status: string; count: number }>('/help/ingest');

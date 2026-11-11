@@ -11,6 +11,7 @@ dist/
 !.claude/launch.json
 .env.content
 .env.admin
+.env.playbook
 walkthrough*.log
 compose_build.log
 deploy_check.log

@@ -8,3 +8,6 @@ console_url = "https://cloud.redis.io"
 
 [profiles.cloud.agent_playbooks]
 url = "https://playbook.public.jgh1h0nphvutbazo.mgmt-0.aws-use1-1.ultra.redis.io"
+
+[profiles.cloud.agent_memory]
+url = "https://agent-memory.public.jgh1h0nphvutbazo.mgmt-0.aws-use1-1.ultra.redis.io"

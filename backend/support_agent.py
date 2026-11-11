@@ -20,6 +20,7 @@ offline runner follows the seeded Skills so the demo works end to end.
 """
 import json
 import logging
+import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -148,7 +149,8 @@ class SkillRunner:
             unmet.append("account id (looks like SF-12345)")
         return unmet
 
-    def run(self, preview: dict, query: str, faq_context: List[dict], trace: Trace) -> dict:
+    def run(self, preview: dict, query: str, faq_context: List[dict], trace: Trace,
+            memory_context: str = "") -> dict:
         version = self.load(preview, trace)
         skill = version["content"]["payload"]["skill"]
         run = {
@@ -169,13 +171,14 @@ class SkillRunner:
             trace.add("route", f"Skill {run['name']} not run: its instructions need an {unmet[0]}", "skip", requires=unmet)
             return run
         if self.openai:
-            self._run_llm(skill, query, faq_context, trace, run)
+            self._run_llm(skill, query, faq_context, trace, run, memory_context)
         else:
             self._run_offline(skill, query, trace, run)
         return run
 
     # LLM tool-calling -----------------------------------------------------
-    def _run_llm(self, skill: dict, query: str, faq_context: List[dict], trace: Trace, run: dict) -> None:
+    def _run_llm(self, skill: dict, query: str, faq_context: List[dict], trace: Trace, run: dict,
+                 memory_context: str = "") -> None:
         manifest = skill["manifest"]
         resources = "\n".join(f"- {r['path']}  ->  {r['uri']}" for r in skill["resources"] if r["path"] != "SKILL.md")
         faq_text = "\n\n".join(f"Approved FAQ ({f['entryKey']} v{f['version']}):\nQ: {f['question']}\nA: {f['answer']}" for f in faq_context)
@@ -186,6 +189,8 @@ class SkillRunner:
             f"# Skill: {manifest['name']}\n{manifest['description']}\n\n{skill['instructions']}\n\n"
             f"# Skill resources (fetch by URI when needed)\n{resources}\n"
             + (f"\n# Approved FAQ answers to reuse verbatim where relevant\n{faq_text}\n" if faq_text else "")
+            + (f"\n# User memory (use only when relevant; never override approved policy or live tool data)\n{memory_context}\n"
+               if memory_context else "")
         )
         messages = [{"role": "system", "content": system}, {"role": "user", "content": query}]
         tools = tool_definitions(manifest.get("allowedTools"))
@@ -323,6 +328,18 @@ class SupportAgent:
         self.openai = self.help.openai_client
         self.skill_runner = SkillRunner(self.playbook, self.systems, self.openai)
         self.extractor = ProposalExtractor(self.sessions, self.playbook, llm_draft=self._llm_draft if self.openai else None)
+        self.memory = None
+        self.memory_hooks = None
+        if all(os.getenv(name) for name in (
+            "IRIS_AGENT_MEMORY_URL", "IRIS_AGENT_MEMORY_STORE_ID", "IRIS_AGENT_MEMORY_API_KEY"
+        )):
+            from redis_iris import AgentMemory
+
+            self.memory = AgentMemory.from_env(assistant_id="streamflix-support")
+            self.memory_hooks = self.memory.hooks(
+                standing=("response preferences",),
+                fail_open=True,
+            )
         try:
             self.router = create_guardrail_router(self.redis, self.vectorizer)
         except Exception as exc:  # the router is optional
@@ -348,10 +365,63 @@ class SupportAgent:
         return json.loads(response.choices[0].message.content or "{}")
 
     # ----------------------------------------------------------------- chat
+    def _finish(self, result: AgentResult, query: str, owner_id: str, memory_session_id: str,
+                trace: Trace) -> AgentResult:
+        if self.memory_hooks is not None:
+            started = time.time()
+            try:
+                recorded = self.memory_hooks.after(
+                    query,
+                    result.answer,
+                    owner=owner_id,
+                    session=memory_session_id,
+                    metadata={"answeredBy": result.answered_by, "supportSessionId": result.session_id},
+                )
+                trace.add(
+                    "memory_record",
+                    "Recorded the user and assistant turns in Agent Memory",
+                    "ok" if recorded else "error",
+                    started,
+                    user=recorded.user,
+                    assistant=recorded.assistant,
+                    owner=owner_id,
+                    session=memory_session_id,
+                )
+            except Exception as exc:
+                logger.warning("Agent Memory recording failed: %s", exc)
+                trace.add("memory_record", "Agent Memory recording failed; the answer was still returned", "error", started,
+                          error=type(exc).__name__)
+        result.trace = trace.steps
+        return result
+
     def chat(self, query: str, discovery_limit: Optional[int] = None,
-             pins: Optional[List[str]] = None) -> AgentResult:
+             pins: Optional[List[str]] = None, owner_id: str = "streamflix-demo-user",
+             memory_session_id: str = "streamflix-demo-session") -> AgentResult:
         trace = Trace()
         result = AgentResult(answer="", answered_by="rag", llm_mode=self.llm_mode)
+
+        # Recall before every answer. The prompt block is injected into model-backed
+        # Skill and RAG paths; FAQ answers remain verbatim governed content.
+        memory_context = ""
+        if self.memory_hooks is not None:
+            started = time.time()
+            try:
+                memory_context = self.memory_hooks.before(
+                    query, owner=owner_id, session=memory_session_id
+                )
+                recalled = bool(memory_context and not memory_context.rstrip().endswith("nothing yet."))
+                trace.add(
+                    "memory_recall",
+                    "Recalled user memory before answering" if recalled else "Agent Memory has nothing relevant yet",
+                    "hit" if recalled else "miss",
+                    started,
+                    owner=owner_id,
+                    promptChars=len(memory_context),
+                )
+            except Exception as exc:
+                logger.warning("Agent Memory recall failed: %s", exc)
+                trace.add("memory_recall", "Agent Memory recall failed; continuing without memories", "error", started,
+                          error=type(exc).__name__)
 
         # 0. Guardrail --------------------------------------------------------
         started = time.time()
@@ -360,8 +430,7 @@ class SupportAgent:
             if match.name is None:
                 trace.add("guardrail", "Guardrail blocked an off-topic question", "miss", started, distance=match.distance)
                 result.answer, result.answered_by, result.blocked = OUT_OF_SCOPE_MESSAGE, "blocked", True
-                result.trace = trace.steps
-                return result
+                return self._finish(result, query, owner_id, memory_session_id, trace)
             trace.add("guardrail", f"Guardrail: on-topic ({match.name})", "ok", started, distance=round(match.distance or 0, 3))
         else:
             trace.add("guardrail", "Guardrail skipped (router unavailable)", "skip")
@@ -429,7 +498,7 @@ class SupportAgent:
                       score=best_faq.get("score"), question=best_faq["faq"]["question"])
 
         if run_skill:
-            run = self.skill_runner.run(best_skill, query, faq_context, trace)
+            run = self.skill_runner.run(best_skill, query, faq_context, trace, memory_context)
             if run.get("skipped"):
                 # The Skill's instructions need data the customer did not give (e.g. an account id).
                 # Fall through to the FAQ / fallback path and tell the customer what to include.
@@ -456,8 +525,7 @@ class SupportAgent:
                 result.answer = run["answer"]
                 result.answered_by = "skill"
             result.session_id = self.sessions.record(query, result.answer, result.answered_by, {"skills": [r["name"] for r in result.skill_runs]})["session_id"]
-            result.trace = trace.steps
-            return result
+            return self._finish(result, query, owner_id, memory_session_id, trace)
 
         if best_faq:
             result.answer = best_faq["faq"]["answer"]
@@ -465,8 +533,7 @@ class SupportAgent:
             trace.add("answer", "Returned the published FAQ answer verbatim (no model call)", "ok")
             result.session_id = self.sessions.record(query, result.answer, "faq", {"faq": best_faq.get("entryKey")})["session_id"]
             result.answer += skill_hint
-            result.trace = trace.steps
-            return result
+            return self._finish(result, query, owner_id, memory_session_id, trace)
 
         # 3. Fallback: RAG over help articles -----------------------------------
         # Deliberately uncached: an unreviewed answer is never replayed. The reviewed,
@@ -477,7 +544,7 @@ class SupportAgent:
         trace.add("rag", f"Help articles retrieved: {len(articles)}", "ok", started,
                   articles=[{"id": a.id, "title": a.title, "similarity": round(a.similarity or 0, 3)} for a in articles])
         started = time.time()
-        answer, usage, generator = self.help.generate_response(query, articles)
+        answer, usage, generator = self.help.generate_response(query, articles, memory_context=memory_context)
         trace.add("llm", f"{LLM_MODEL} generated an answer from the articles" if generator == "llm" else "Offline: quoted the best help article",
                   "ok" if generator == "llm" else "skip", started, tokens=usage.total_tokens if usage else 0)
         result.answer, result.sources, result.token_usage, result.answered_by = answer, articles, usage, "rag"
@@ -486,19 +553,21 @@ class SupportAgent:
         session = self.sessions.record(query, answer, "rag", {"articles": [a.id for a in articles]})
         result.session_id = session["session_id"]
         started = time.time()
-        try:
-            proposal = self.extractor.maybe_propose(query)
-            result.proposal = proposal
-            if proposal and proposal.get("proposed"):
-                trace.add("propose", f"Filed FAQ proposal from {proposal['clusterSize']} similar sessions", "hit", started, **proposal)
-            else:
-                trace.add("propose", f"Session recorded as evidence ({proposal['clusterSize']}/{proposal['needed']} similar sessions so far)",
-                          "ok", started, **(proposal or {}))
-        except errors.PlaybookError as exc:
-            trace.add("propose", f"Proposal step failed: {exc.detail}", "error", started, type=exc.type)
+        if self.memory_hooks is not None:
+            trace.add("propose", "FAQ proposal extraction delegated to the Agent Memory worker", "skip", started)
+        else:
+            try:
+                proposal = self.extractor.maybe_propose(query)
+                result.proposal = proposal
+                if proposal and proposal.get("proposed"):
+                    trace.add("propose", f"Filed FAQ proposal from {proposal['clusterSize']} similar sessions", "hit", started, **proposal)
+                else:
+                    trace.add("propose", f"Session recorded as evidence ({proposal['clusterSize']}/{proposal['needed']} similar sessions so far)",
+                              "ok", started, **(proposal or {}))
+            except errors.PlaybookError as exc:
+                trace.add("propose", f"Proposal step failed: {exc.detail}", "error", started, type=exc.type)
         result.answer += skill_hint
-        result.trace = trace.steps
-        return result
+        return self._finish(result, query, owner_id, memory_session_id, trace)
 
 
 _agent: Optional[SupportAgent] = None

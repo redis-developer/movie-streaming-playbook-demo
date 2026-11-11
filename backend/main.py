@@ -60,10 +60,24 @@ async def health():
         playbook_health = get_playbook().health()
     except Exception as exc:
         playbook_health = {"status": "unavailable", "error": str(exc)}
+    memory_health: Dict[str, Any] = {"configured": False, "status": "disabled"}
+    try:
+        agent = get_agent()
+        if agent.memory is not None:
+            checked = agent.memory.health()
+            memory_health = {
+                "configured": True,
+                "status": checked.status.lower(),
+                "features": {name: status.lower() for name, status in checked.features.items()},
+            }
+    except Exception as exc:
+        memory_health = {"configured": True, "status": "unavailable", "error": type(exc).__name__}
     return {
-        "status": "healthy" if redis_ok and playbook_health.get("status") == "ready" else ("degraded" if redis_ok else "unhealthy"),
+        "status": "healthy" if redis_ok and playbook_health.get("status") == "ready" and memory_health.get("status") in ("healthy", "disabled")
+                  else ("degraded" if redis_ok else "unhealthy"),
         "redis_connected": redis_ok,
         "playbook": playbook_health,
+        "agent_memory": memory_health,
         "playbook_mode": resolve_playbook_mode(),
         "llm_mode": "llm" if OPENAI_API_KEY else "offline",
     }
@@ -76,12 +90,22 @@ class HelpChatRequest(BaseModel):
     message: str = Field(..., description="Customer message")
     discovery_limit: Optional[int] = Field(None, ge=1, le=50, description="Cap discovery results for this turn")
     pins: Optional[List[str]] = Field(None, description="Entry keys to pin into discovery")
+    user_id: str = Field("streamflix-demo-user", min_length=1, max_length=128,
+                         description="Stable user identifier used as the Agent Memory owner")
+    memory_session_id: str = Field("streamflix-demo-session", min_length=1, max_length=128,
+                                   description="Stable conversation identifier used by Agent Memory")
 
 
 @app.post("/api/help/chat", tags=["Help Center"])
 async def help_chat(request: HelpChatRequest):
     started = time.time()
-    result = get_agent().chat(request.message, discovery_limit=request.discovery_limit, pins=request.pins)
+    result = get_agent().chat(
+        request.message,
+        discovery_limit=request.discovery_limit,
+        pins=request.pins,
+        owner_id=request.user_id,
+        memory_session_id=request.memory_session_id,
+    )
     return {
         "answer": result.answer,
         "answered_by": result.answered_by,
@@ -174,7 +198,12 @@ async def clear_sessions():
 @app.post("/api/help/extract", tags=["Help Center"])
 async def extract_proposals():
     """Run knowledge extraction over all pending sessions now (normally automatic after each RAG answer)."""
-    return get_agent().extractor.run_all()
+    agent = get_agent()
+    if agent.memory_hooks is not None:
+        return {"proposals": [], "pendingSessions": 0, "minSessions": EXTRACTION_MIN_SESSIONS,
+                "delegated": True,
+                "message": "Agent Memory records turns; the Playbook extraction worker creates FAQ proposals in the background."}
+    return agent.extractor.run_all()
 
 
 # =============================================================================
