@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HelpCenter } from './pages/HelpCenter';
 import { PlaybookStudio } from './pages/PlaybookStudio';
 import { helpStats, type HelpStats } from './api/playbookApi';
@@ -9,12 +9,37 @@ type AppPage = 'help' | 'studio';
 function App() {
   const [page, setPage] = useState<AppPage>('help');
   const [stats, setStats] = useState<HelpStats | null>(null);
+  const [backendState, setBackendState] = useState<'loading' | 'reachable' | 'unreachable'>('loading');
   const [refreshKey, setRefreshKey] = useState(0);
+  const consecutiveFailures = useRef(0);
 
   const refresh = () => setRefreshKey((k) => k + 1);
 
   useEffect(() => {
-    helpStats().then(setStats).catch(() => setStats(null));
+    let cancelled = false;
+    let retry: ReturnType<typeof setTimeout> | undefined;
+
+    const checkBackend = async () => {
+      try {
+        const next = await helpStats();
+        if (cancelled) return;
+        consecutiveFailures.current = 0;
+        setStats(next);
+        setBackendState('reachable');
+      } catch {
+        if (cancelled) return;
+        consecutiveFailures.current += 1;
+        if (consecutiveFailures.current >= 3) setBackendState('unreachable');
+      } finally {
+        if (!cancelled) retry = setTimeout(checkBackend, 5000);
+      }
+    };
+
+    checkBackend();
+    return () => {
+      cancelled = true;
+      if (retry) clearTimeout(retry);
+    };
   }, [refreshKey, page]);
 
   return (
@@ -37,7 +62,7 @@ function App() {
           </button>
         </div>
         <div className="nav-status">
-          {stats ? (
+          {stats && backendState !== 'unreachable' ? (
             <>
               <span className={`mode-pill ${stats.playbook_mode}`} title="Where the Playbook lives">
                 Playbook: {stats.playbook_mode === 'remote' ? 'Redis Playbook service' : 'embedded on Redis'}
@@ -46,6 +71,8 @@ function App() {
                 Agent: {stats.llm_mode === 'llm' ? 'LLM tool calling' : 'offline runner'}
               </span>
             </>
+          ) : backendState === 'loading' ? (
+            <span className="mode-pill offline">Connecting to backend…</span>
           ) : (
             <span className="mode-pill offline">Backend unreachable</span>
           )}
