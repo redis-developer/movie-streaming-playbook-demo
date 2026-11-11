@@ -92,6 +92,29 @@ proposer. Configure **Automatic FAQ extraction** on the Playbook to read this
 Memory store; the Playbook worker then creates reviewable FAQ proposals from idle
 conversations. It does not create Skill proposals.
 
+### Learned procedures (Skill proposals)
+
+The demo includes an application-owned worker for review-gated procedure learning.
+In **Playbook Studio → Settings**, record at least three similar support cases with
+their human-verified resolutions, then click **Draft Skill proposals**. The worker:
+
+1. clusters cases by semantic similarity;
+2. redacts common account, email, and phone identifiers;
+3. uses the configured OpenAI model to draft a complete `SKILL.md` package;
+4. calls the Playbook Skill proposal API and attaches every resolved case through
+   the evidence API.
+
+The proposed Skill stays in the Playbook inbox. A reviewer can inspect the exact
+instructions and evidence, dismiss it, or accept it as an **unpublished** Skill
+draft. Publication remains a separate explicit action, so an observed procedure
+never becomes agent behavior on its own. Agent Memory can be another upstream
+source for the same worker, but the built-in Memory extraction worker currently
+creates FAQ proposals only; it does not create Skill proposals.
+
+Learned Skill drafting fails closed: if `OPENAI_API_KEY` is missing, the model
+request fails, or the response is incomplete, the endpoint returns an error and
+does not file a proposal. There is no deterministic fallback.
+
 ### With or without an OpenAI key
 
 | | `OPENAI_API_KEY` set | not set (offline mode) |
@@ -100,6 +123,7 @@ conversations. It does not create Skill proposals.
 | Skill execution | tool-calling agent (`gpt-4o-mini` by default) follows the instructions, decides which resource to fetch and which live-data tool to call | deterministic runner follows the three seeded Skills the same way (trace shows `offline runner`) |
 | RAG fallback | model writes the answer from the articles | quotes the best help article |
 | FAQ proposal draft | model writes a canonical question and answer from the sessions | the most central session's question and answer |
+| Skill proposal draft | model distills repeated human-resolved cases into review-only instructions | unavailable; no proposal is created without OpenAI |
 
 The agent only ever exposes the tools a Skill lists in `allowed-tools`.
 
@@ -167,6 +191,8 @@ they are recorded as evidence for a FAQ proposal instead of being replayed.
 
 Chat: `POST /api/help/chat` `{message, discovery_limit?, pins?}` returns the
 answer plus `answered_by`, `trace`, `faq_hits`, `skill_runs`, `discovery` and `proposal`.
+Learned procedures use `POST /api/help/resolved-cases` to record human-verified
+evidence and `POST /api/help/extract-skills` to file review-only Skill proposals.
 Everything under `/api/playbook/*` mirrors the Playbook data-plane routes
 (`/faqs`, `/skills`, `/{type}/{id}/versions`, `/{type}/{id}/publication`, `/discover`,
 `/proposals`, `/proposals/{id}/evidence`, `/proposals/{id}/acceptance`). Interactive docs:

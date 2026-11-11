@@ -357,6 +357,22 @@ class RemotePlaybook:
             request["source"] = self._source(source)
         return _norm_proposal(_dump(self._call("create_proposal", **request)))
 
+    def create_skill_proposal(self, package_base64, entry_key=None, intents=None, attributes=None, metadata=None,
+                              source=None) -> dict:
+        action = {"add": {
+            "target": {"new_entry": {"entry_key": entry_key} if entry_key else {}},
+            "candidate": {"content": {
+                "payload": {"skill_package": {"package_base64": package_base64}},
+                "intents": list(intents or []),
+                "attributes": dict(attributes or {}),
+                "metadata": metadata if metadata is not None else {},
+            }},
+        }}
+        request = {"action": action}
+        if source:
+            request["source"] = self._source(source)
+        return _norm_proposal(_dump(self._call("create_proposal", **request)))
+
     def get_proposal(self, proposal_id) -> dict:
         return _norm_proposal(_dump(self._call("get_proposal", proposal_id=proposal_id)))
 
@@ -370,6 +386,7 @@ class RemotePlaybook:
         }
         result = _dump(self._call("submit_proposal_evidence", **request))
         result.setdefault("disposition", "added")
+        result["disposition"] = _lower(result["disposition"])
         return result
 
     def list_proposals(self, view: str = "inbox", limit: int = 200) -> dict:
@@ -409,6 +426,9 @@ class RemotePlaybook:
                 raise
 
     def accept_proposal(self, proposal_id, expected_revision) -> dict:
+        candidate = self.get_proposal(proposal_id)
+        payload = candidate.get("action", {}).get("add", {}).get("candidate", {}).get("content", {}).get("payload", {})
+        entry_type = "skill" if "skill" in payload or "skillPackage" in payload or "skill_package" in payload else "faq"
         result = _dump(self._call("accept_proposal", proposal_id=proposal_id, expected_revision=str(expected_revision)))
         created = (result.get("result") or {}).get("versionCreated") or result.get("versionCreated") or {}
         entry_id = created.get("entryId")
@@ -419,6 +439,8 @@ class RemotePlaybook:
         if not entry_id:
             raise errors.unavailable("acceptance did not report the created entry yet; refresh the proposal")
         version = int(created.get("version", 1))
+        if entry_type == "skill":
+            return {"entry": self.get_skill(entry_id), "version": self.get_skill_version(entry_id, version)}
         return {"entry": self.get_faq(entry_id), "version": self.get_faq_version(entry_id, version)}
 
     # ------------------------------------------------------------------ admin

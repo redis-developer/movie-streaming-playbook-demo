@@ -10,10 +10,14 @@ agent retrieves the approved FAQ instead of re-deriving the answer.
 
 Sessions live in Redis under sf:session:<id> with a vector index `support_sessions`.
 """
+import base64
 import hashlib
+import io
 import json
 import logging
+import re
 import uuid
+import zipfile
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional
 
@@ -108,7 +112,8 @@ class SessionLog:
         return len(keys)
 
     # ----------------------------------------------------------------- cluster
-    def similar_unproposed(self, question: str, distance: float = EXTRACTION_SESSION_DISTANCE, limit: int = 25) -> List[dict]:
+    def similar_unproposed(self, question: str, distance: float = EXTRACTION_SESSION_DISTANCE, limit: int = 25,
+                           answered_by: str = "rag") -> List[dict]:
         """Sessions about the same question that were answered without an FAQ and are not yet attached to a proposal."""
         query = RangeQuery(
             vector=self.embed(question),
@@ -118,7 +123,7 @@ class SessionLog:
             return_fields=["session_id", "question", "answer", "answered_by", "proposal_id", "created_at"],
             return_score=True,
         )
-        query.set_filter(Tag("answered_by") == "rag")
+        query.set_filter(Tag("answered_by") == answered_by)
         rows = self.index.query(query)
         # an empty tag cannot be matched in RediSearch, so unattached sessions are filtered client-side
         return [row for row in rows if not row.get("proposal_id")]
@@ -232,5 +237,126 @@ class ProposalExtractor:
                 continue
             result = self.propose_from_cluster(cluster)
             seen.update(c["session_id"] for c in cluster)
+            proposals.append(result)
+        return {"proposals": proposals, "pendingSessions": len(pending), "minSessions": self.min_sessions}
+
+
+class SkillProposalExtractor:
+    """Draft review-only Skill proposals from repeated, human-resolved support cases."""
+
+    def __init__(self, sessions: SessionLog, playbook,
+                 llm_draft: Optional[Callable[[List[dict]], Dict[str, Any]]] = None,
+                 min_sessions: int = EXTRACTION_MIN_SESSIONS):
+        self.sessions = sessions
+        self.playbook = playbook
+        self.llm_draft = llm_draft
+        self.min_sessions = min_sessions
+
+    @staticmethod
+    def _redact(value: str) -> str:
+        value = re.sub(r"\bSF-\d{5}\b", "[account-id]", value, flags=re.I)
+        value = re.sub(r"[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}", "[email]", value)
+        value = re.sub(r"(?<!\w)(?:\+?\d[\d .()-]{7,}\d)(?!\w)", "[phone]", value)
+        return value.strip()
+
+    def _draft(self, cluster: List[dict]) -> Dict[str, Any]:
+        if self.llm_draft is None:
+            raise errors.unavailable(
+                "OPENAI_API_KEY is required to draft learned Skill proposals; no fallback proposal was created"
+            )
+        try:
+            draft = self.llm_draft(cluster)
+        except Exception as exc:
+            logger.warning("OpenAI Skill drafting failed: %s", type(exc).__name__)
+            raise errors.unavailable(
+                f"OpenAI Skill drafting failed ({type(exc).__name__}); no proposal was created"
+            ) from exc
+        if not draft.get("name") or not draft.get("description") or not draft.get("instructions"):
+            raise errors.unavailable("OpenAI returned an incomplete Skill draft; no proposal was created")
+        draft["description"] = self._redact(str(draft["description"]))
+        draft["instructions"] = self._redact(str(draft["instructions"]))
+        draft["intents"] = [self._redact(str(value)) for value in draft.get("intents", [])]
+        draft["generator"] = "openai"
+        return draft
+
+    @staticmethod
+    def _package(draft: Dict[str, Any]) -> str:
+        name = re.sub(r"[^a-z0-9-]", "-", draft["name"].lower()).strip("-")[:64]
+        description = str(draft["description"]).replace("\n", " ").strip()
+        skill_md = (
+            "---\n"
+            f"name: {name}\n"
+            f"description: {json.dumps(description)}\n"
+            "license: Proprietary\n"
+            "metadata:\n"
+            "  owner: support-operations\n"
+            "  origin: learned-procedure-proposal\n"
+            "---\n"
+            f"{draft['instructions'].strip()}\n"
+        )
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w", zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr(f"{name}/SKILL.md", skill_md.encode("utf-8"))
+        return base64.b64encode(output.getvalue()).decode("ascii")
+
+    @staticmethod
+    def _evidence_source(row: dict) -> dict:
+        return {
+            "type": "resolved_support_case",
+            "reference": {"sessionId": row["session_id"], "recordedAt": row.get("created_at")},
+            "content": {
+                "issue": SkillProposalExtractor._redact(row.get("question") or "")[:600],
+                "resolutionExcerpt": SkillProposalExtractor._redact(row.get("answer") or "")[:800],
+                "answeredBy": row.get("answered_by"),
+            },
+        }
+
+    def propose_from_cluster(self, cluster: List[dict]) -> dict:
+        draft = self._draft(cluster)
+        key = re.sub(r"[^a-z0-9-]", "-", draft["name"].lower()).strip("-")[:64]
+        intents = list(dict.fromkeys(self._redact(value)[:240] for value in draft.get("intents", []) if value))[:5]
+        source = {
+            "type": "learned_procedure_worker",
+            "reference": {"producer": EVIDENCE_PRODUCER, "sessionCount": len(cluster), "generator": draft["generator"]},
+            "content": {"sessionIds": [row["session_id"] for row in cluster]},
+        }
+        package = self._package(draft)
+        try:
+            proposal = self.playbook.create_skill_proposal(
+                package, entry_key=key, intents=intents,
+                attributes={"topic": "support", "origin": "resolved-cases"},
+                metadata={"generator": draft["generator"], "reviewRequired": True}, source=source,
+            )
+        except errors.PlaybookError as exc:
+            if exc.type == errors.PROPOSAL_ALREADY_EXISTS and exc.extra.get("existingProposalId"):
+                proposal = self.playbook.get_proposal(exc.extra["existingProposalId"])
+            else:
+                raise
+        proposal_id = proposal["proposalId"]
+        added = 0
+        for row in cluster:
+            result = self.playbook.submit_evidence(
+                proposal_id, evidence_id_for(row["session_id"]), row.get("created_at") or _now(),
+                EVIDENCE_PRODUCER, self._evidence_source(row),
+            )
+            if result.get("disposition") == "added":
+                added += 1
+        self.sessions.attach_proposal([row["session_id"] for row in cluster], proposal_id)
+        return {"proposed": True, "proposalId": proposal_id, "clusterSize": len(cluster),
+                "evidenceAdded": added, "name": key, "generator": draft["generator"]}
+
+    def run_all(self) -> dict:
+        pending = [row for row in self.sessions.list(limit=500)
+                   if row.get("answered_by") == "human" and not row.get("proposal_id")]
+        proposals, seen = [], set()
+        for row in pending:
+            if row["session_id"] in seen:
+                continue
+            cluster = self.sessions.similar_unproposed(row["question"], answered_by="human")
+            cluster = [item for item in cluster if item["session_id"] not in seen]
+            if len(cluster) < self.min_sessions:
+                continue
+            result = self.propose_from_cluster(cluster)
+            seen.update(item["session_id"] for item in cluster)
             proposals.append(result)
         return {"proposals": proposals, "pendingSessions": len(pending), "minSessions": self.min_sessions}

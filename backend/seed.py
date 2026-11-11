@@ -61,7 +61,11 @@ def seed_skills(playbook, existing: Dict[str, dict]) -> dict:
             skipped += 1
             continue
         package = build_package_from_dir(directory)
-        meta_file = directory / "playbook.json"  # optional intents/attributes next to the package
+        # Use the standard CLI metadata filename so local and Cloud seeding share
+        # one source of truth. Keep the legacy filename as a fallback.
+        meta_file = directory / ".iris-playbook.json"
+        if not meta_file.exists():
+            meta_file = directory / "playbook.json"
         content_meta = json.loads(meta_file.read_text()) if meta_file.exists() else {"intents": [], "attributes": {"topic": "support"}}
         result = playbook.create_skill(package, entry_key=key, content_meta=content_meta)
         playbook.publish_skill(result["entry"]["entryId"], 1)

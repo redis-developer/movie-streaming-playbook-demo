@@ -143,6 +143,7 @@ async def help_stats():
         "sessions": {
             "total": len(sessions),
             "pending_rag": sum(1 for s in sessions if s.get("answered_by") == "rag" and not s.get("proposal_id")),
+            "pending_resolved_cases": sum(1 for s in sessions if s.get("answered_by") == "human" and not s.get("proposal_id")),
             "min_for_proposal": EXTRACTION_MIN_SESSIONS,
         },
         "llm_mode": agent.llm_mode,
@@ -172,6 +173,11 @@ async def suggestions():
             {"title": "Same request, right procedure",
              "steps": ["Ask: What's the status of my refund? My account is SF-48213",
                        "The trace shows discover -> load_skill check-refund-status -> lookup_refund -> fetch only refund-timelines.md"]},
+            {"title": "Learn a procedure, review before serving",
+             "steps": ["In Studio > Settings, record three similar cases with their human-verified resolutions",
+                       "Click Draft Skill proposals; the worker clusters cases, redacts common identifiers and attaches the cases as evidence",
+                       "In Proposals, inspect the Skill instructions and evidence, then Accept as draft Skill",
+                       "Publish v1 only after review; until then discovery cannot serve it"]},
             {"title": "One request, two kinds of reuse",
              "steps": ["Ask the refund policy question and the refund status for SF-77102 in one message",
                        "The FAQ answers the policy; the Skill handles the live lookup"]},
@@ -195,6 +201,17 @@ async def clear_sessions():
     return {"deleted": get_agent().sessions.clear()}
 
 
+class ResolvedCaseBody(BaseModel):
+    issue: str = Field(..., min_length=3, max_length=2048)
+    resolution: str = Field(..., min_length=3, max_length=8000)
+
+
+@app.post("/api/help/resolved-cases", status_code=201, tags=["Help Center"])
+async def record_resolved_case(body: ResolvedCaseBody):
+    """Record a human-resolved case as evidence for review-gated learned procedures."""
+    return get_agent().sessions.record(body.issue, body.resolution, "human", {"source": "resolved-case"})
+
+
 @app.post("/api/help/extract", tags=["Help Center"])
 async def extract_proposals():
     """Run knowledge extraction over all pending sessions now (normally automatic after each RAG answer)."""
@@ -204,6 +221,12 @@ async def extract_proposals():
                 "delegated": True,
                 "message": "Agent Memory records turns; the Playbook extraction worker creates FAQ proposals in the background."}
     return agent.extractor.run_all()
+
+
+@app.post("/api/help/extract-skills", tags=["Help Center"])
+async def extract_skill_proposals():
+    """Cluster resolved cases and file learned Skill drafts with evidence; never publish them."""
+    return get_agent().skill_extractor.run_all()
 
 
 # =============================================================================

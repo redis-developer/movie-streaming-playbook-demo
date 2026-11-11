@@ -1,0 +1,8 @@
+{
+  "intents": [
+    "I need to speak to a human agent",
+    "Please escalate this support request",
+    "Can a supervisor review my issue?",
+    "I need help with an account change or fraud concern"
+  ]
+}

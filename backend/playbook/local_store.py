@@ -16,8 +16,8 @@ What it models:
   FAQs return answers, Skills return name/description/URI only)
 - *Skill loading*: exact-version instructions and resource descriptors, then
   exact resource bytes by `skill://` URI, verified by digest
-- *proposals*: candidate FAQs with bounded evidence, an Inbox/Trash lifecycle and
-  acceptance into an unpublished FAQ draft
+- *proposals*: candidate FAQs or Skills with bounded evidence, an Inbox/Trash
+  lifecycle and acceptance into an unpublished draft
 
 Redis layout (prefix pb:<playbookId>:)
   config                        JSON   Playbook config (discovery + proposal policy)
@@ -780,12 +780,17 @@ class EmbeddedPlaybook:
 
     def _save_proposal(self, doc: dict) -> None:
         self.redis.set(self._key("proposal", doc["proposalId"]), json.dumps(doc))
-        faq = doc["action"]["add"]["candidate"]["content"]["payload"]["faq"]
+        payload = doc["action"]["add"]["candidate"]["content"]["payload"]
+        if "faq" in payload:
+            search_text = payload["faq"]["question"]
+        else:
+            manifest = payload["skill"]["manifest"]
+            search_text = f"{manifest['name']} {manifest['description']}"
         self.redis.hset(self._key("pidx", doc["proposalId"]), mapping={
             "proposal_id": doc["proposalId"],
             "status": doc["status"],
             "digest": doc["contentDigest"].replace(":", "_"),
-            "question": faq["question"],
+            "question": search_text,
             "updated_at": _ts(doc["updatedAt"]),
             "created_at": _ts(doc["createdAt"]),
             "evidence_count": len(doc["evidence"]),
@@ -796,10 +801,16 @@ class EmbeddedPlaybook:
         candidate = doc["action"]["add"]["candidate"]["content"]
         preview = {key: doc[key] for key in ("proposalId", "status", "contentDigest", "proposalRevision",
                                              "evidenceCount", "createdAt", "updatedAt", "inboxExpiresAt", "purgeAt")}
+        payload = candidate["payload"]
+        if "faq" in payload:
+            preview_payload = {"faq": {"question": payload["faq"]["question"]}}
+        else:
+            skill = payload["skill"]
+            preview_payload = {"skill": {"manifest": skill["manifest"], "instructions": skill["instructions"]}}
         preview["action"] = {"add": {
             "target": doc["action"]["add"]["target"],
             "candidate": {"content": {
-                "payload": {"faq": {"question": candidate["payload"]["faq"]["question"]}},
+                "payload": preview_payload,
                 "metadata": candidate.get("metadata", {}),
             }},
         }}
@@ -854,8 +865,56 @@ class EmbeddedPlaybook:
         self.redis.set(self._key("pdigest", digest), doc["proposalId"])
         return doc
 
+    def create_skill_proposal(self, package_base64: str, entry_key: Optional[str] = None,
+                              intents=None, attributes=None, metadata=None, source: Optional[dict] = None) -> dict:
+        manifest, instructions, descriptors, _files = parse_package(package_base64)
+        intents, attributes, metadata = _normalize_meta(intents, attributes, metadata)
+        for descriptor in descriptors:
+            descriptor["uri"] = ""
+        content = {
+            "payload": {"skill": {"format": "agent-skills", "manifest": manifest,
+                                    "instructions": instructions, "resources": descriptors}},
+            "intents": intents,
+            "attributes": attributes,
+            "metadata": metadata,
+        }
+        digest = skill_digest(manifest, instructions, descriptors, intents, attributes, metadata)
+        entry_key = _validate_entry_key(entry_key)
+        existing = self.redis.get(self._key("pdigest", digest))
+        if existing:
+            existing_id = existing.decode()
+            try:
+                self._proposal_doc(existing_id)
+                raise errors.conflict(errors.PROPOSAL_ALREADY_EXISTS, "an identical candidate is already proposed",
+                                      existingProposalId=existing_id)
+            except errors.PlaybookError as exc:
+                if exc.status != 404:
+                    raise
+        policy = self.get_config().get("proposalPolicy", self._proposal_defaults)
+        if sum(1 for proposal in self._all_proposals() if proposal["status"] == "open") >= int(policy.get("maxOpenProposals", 200)):
+            raise errors.conflict(errors.CONTENT_LIMIT_EXCEEDED, "maxOpenProposals reached")
+        created = now_iso()
+        inbox, purge = self._deadlines()
+        doc = {
+            "proposalId": _new_id("prp"), "status": "open", "contentDigest": digest,
+            "proposalRevision": 1, "evidenceCount": 0, "createdAt": created, "updatedAt": created,
+            "inboxExpiresAt": inbox, "purgeAt": purge,
+            "action": {"add": {"target": {"newEntry": {"entryKey": entry_key} if entry_key else {}},
+                               "candidate": {"content": content}}},
+            "evidence": [], "_packageBase64": package_base64,
+        }
+        if source:
+            doc["source"] = source
+        self._save_proposal(doc)
+        self.redis.set(self._key("pdigest", digest), doc["proposalId"])
+        public = dict(doc)
+        public.pop("_packageBase64", None)
+        return public
+
     def get_proposal(self, proposal_id: str) -> dict:
-        return self._proposal_doc(proposal_id)
+        doc = self._proposal_doc(proposal_id)
+        doc.pop("_packageBase64", None)
+        return doc
 
     def submit_evidence(self, proposal_id: str, evidence_id: str, observed_at: str, producer: dict, source: dict) -> dict:
         doc = self._proposal_doc(proposal_id)
@@ -983,11 +1042,18 @@ class EmbeddedPlaybook:
         doc["status"] = "promoting"
         self._save_proposal(doc)
         content = doc["action"]["add"]["candidate"]["content"]
-        faq = content["payload"]["faq"]
+        payload = content["payload"]
         entry_key = doc["action"]["add"]["target"].get("newEntry", {}).get("entryKey")
         try:
-            result = self.create_faq(faq["question"], faq["answer"], entry_key, content.get("intents"),
-                                     content.get("attributes"), content.get("metadata"))
+            if "skill" in payload:
+                result = self.create_skill(doc["_packageBase64"], entry_key, {
+                    "intents": content.get("intents"), "attributes": content.get("attributes"),
+                    "metadata": content.get("metadata"),
+                })
+            else:
+                faq = payload["faq"]
+                result = self.create_faq(faq["question"], faq["answer"], entry_key, content.get("intents"),
+                                         content.get("attributes"), content.get("metadata"))
         except errors.PlaybookError:
             doc["status"] = "open"
             self._save_proposal(doc)

@@ -114,7 +114,10 @@ export interface ProposalPreview {
   action: {
     add: {
       target: { newEntry?: { entryKey?: string } };
-      candidate: { content: { payload: { faq: { question: string } }; metadata?: unknown } };
+      candidate: { content: { payload: {
+        faq?: { question: string };
+        skill?: { manifest: SkillContent['manifest']; instructions: string; resources?: ResourceDescriptor[] };
+      }; metadata?: unknown } };
     };
   };
 }
@@ -124,7 +127,7 @@ export interface Proposal extends Omit<ProposalPreview, 'action'> {
   action: {
     add: {
       target: { newEntry?: { entryKey?: string } };
-      candidate: { content: { payload: { faq: FaqContent }; intents: string[]; attributes: Record<string, unknown>; metadata?: unknown } };
+      candidate: { content: { payload: { faq?: FaqContent; skill?: SkillContent }; intents: string[]; attributes: Record<string, unknown>; metadata?: unknown } };
     };
   };
   evidence: ProposalEvidence[];
@@ -223,7 +226,7 @@ export interface ChatMessage {
 export interface HelpStats {
   articles: { index_name: string; num_articles: number; index_status: string };
   playbook: PlaybookStats;
-  sessions: { total: number; pending_rag: number; min_for_proposal: number };
+  sessions: { total: number; pending_rag: number; pending_resolved_cases?: number; min_for_proposal: number };
   llm_mode: 'llm' | 'offline';
   playbook_mode: 'embedded' | 'remote';
 }
@@ -309,6 +312,9 @@ export const helpIngest = () => post<{ status: string; count: number }>('/help/i
 export const listSessions = (limit = 50) => request<{ sessions: SessionRecord[] }>(`/help/sessions?limit=${limit}`);
 export const clearSessions = () => post<{ deleted: number }>('/help/sessions/clear');
 export const extractProposals = () => post<{ proposals: { proposalId: string; question: string; clusterSize: number }[]; pendingSessions: number; minSessions: number }>('/help/extract');
+export const recordResolvedCase = (issue: string, resolution: string) =>
+  post<SessionRecord>('/help/resolved-cases', { issue, resolution });
+export const extractSkillProposals = () => post<{ proposals: { proposalId: string; name: string; clusterSize: number }[]; pendingSessions: number; minSessions: number }>('/help/extract-skills');
 export const listAccounts = () => request<{ accounts: Account[] }>('/accounts');
 
 // ----------------------------------------------------------------- playbook

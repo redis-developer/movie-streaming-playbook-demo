@@ -1,6 +1,6 @@
 ---
 name: check-refund-status
-description: Look up the live status of a customer's refund and explain what happens next, using the account's current refund record rather than a remembered answer.
+description: Check refund status when a customer asks what happened to my refund, where is my refund, when will it arrive, or was it approved or denied.
 license: Proprietary
 compatibility: StreamFlix support agents with access to the lookup_refund tool
 metadata:

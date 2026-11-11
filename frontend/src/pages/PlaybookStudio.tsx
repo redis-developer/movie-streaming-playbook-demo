@@ -9,6 +9,7 @@ import {
   deleteFaq,
   discover,
   dismissProposal,
+  extractSkillProposals,
   fetchResource,
   getProposal,
   getSkillVersion,
@@ -24,6 +25,7 @@ import {
   publishFaq,
   publishSkill,
   purgeProposal,
+  recordResolvedCase,
   replaceProposal,
   restoreProposal,
   seedPlaybook,
@@ -95,7 +97,7 @@ export function PlaybookStudio({ onChanged }: StudioProps) {
       <main className="studio-main">
         {tab === 'faqs' && <FaqRegistry onChanged={changed} ok={ok} fail={fail} />}
         {tab === 'skills' && <SkillRegistry onChanged={changed} ok={ok} fail={fail} />}
-        {tab === 'proposals' && <ProposalsInbox onChanged={changed} ok={ok} fail={fail} goToFaqs={() => setTab('faqs')} />}
+        {tab === 'proposals' && <ProposalsInbox onChanged={changed} ok={ok} fail={fail} goToFaqs={() => setTab('faqs')} goToSkills={() => setTab('skills')} />}
         {tab === 'discovery' && <DiscoveryPlayground fail={fail} />}
         {tab === 'settings' && <Settings onChanged={changed} ok={ok} fail={fail} />}
       </main>
@@ -377,28 +379,36 @@ function SkillRegistry({ onChanged, ok, fail }: PanelProps) {
 }
 
 // ============================================================ Proposals inbox
-function ProposalsInbox({ onChanged, ok, fail, goToFaqs }: PanelProps & { goToFaqs: () => void }) {
+function ProposalsInbox({ onChanged, ok, fail, goToFaqs, goToSkills }: PanelProps & { goToFaqs: () => void; goToSkills: () => void }) {
   const [view, setView] = useState<'inbox' | 'trash'>('inbox');
   const [proposals, setProposals] = useState<ProposalPreview[]>([]);
   const [selected, setSelected] = useState<Proposal | null>(null);
   const [edit, setEdit] = useState<{ question: string; answer: string; entryKey: string; intents: string } | null>(null);
-  const [accepted, setAccepted] = useState<{ entryId: string; entryKey?: string } | null>(null);
+  const [accepted, setAccepted] = useState<{ entryId: string; entryKey?: string; entryType: 'faq' | 'skill' } | null>(null);
 
   const load = useCallback(async () => {
     const data = await listProposals(view).catch(() => ({ proposals: [] }));
     setProposals(data.proposals);
   }, [view]);
 
-  useEffect(() => { load(); setSelected(null); setEdit(null); setAccepted(null); }, [load]);
+  useEffect(() => { load(); }, [load]);
+
+  const changeView = (next: 'inbox' | 'trash') => {
+    setView(next);
+    setSelected(null);
+    setEdit(null);
+    setAccepted(null);
+  };
 
   const open = async (proposalId: string) => {
     try {
       const proposal = await getProposal(proposalId);
       setSelected(proposal);
       const faq = proposal.action.add.candidate.content.payload.faq;
-      setEdit({ question: faq.question, answer: faq.answer, entryKey: proposal.action.add.target.newEntry?.entryKey || '',
-        intents: (proposal.action.add.candidate.content.intents || []).join(', ') });
-      setAccepted(proposal.targetEntryId ? { entryId: proposal.targetEntryId } : null);
+      setEdit(faq ? { question: faq.question, answer: faq.answer, entryKey: proposal.action.add.target.newEntry?.entryKey || '',
+        intents: (proposal.action.add.candidate.content.intents || []).join(', ') } : null);
+      const entryType = proposal.action.add.candidate.content.payload.skill ? 'skill' : 'faq';
+      setAccepted(proposal.targetEntryId ? { entryId: proposal.targetEntryId, entryType } : null);
     } catch (error) { fail(error); }
   };
 
@@ -418,18 +428,18 @@ function ProposalsInbox({ onChanged, ok, fail, goToFaqs }: PanelProps & { goToFa
         <div className="list-head">
           <h2>Proposals</h2>
           <div className="segmented">
-            <button className={view === 'inbox' ? 'active' : ''} onClick={() => setView('inbox')}>Inbox</button>
-            <button className={view === 'trash' ? 'active' : ''} onClick={() => setView('trash')}>Trash</button>
+            <button className={view === 'inbox' ? 'active' : ''} onClick={() => changeView('inbox')}>Inbox</button>
+            <button className={view === 'trash' ? 'active' : ''} onClick={() => changeView('trash')}>Trash</button>
           </div>
         </div>
         <p className="muted small">Candidates extracted from support sessions. Nothing here is visible to agents until a human accepts and publishes it.</p>
         <table className="entry-table">
-          <thead><tr><th>Candidate FAQ</th><th>Evidence</th><th>Status</th><th>Updated</th></tr></thead>
+          <thead><tr><th>Candidate</th><th>Evidence</th><th>Status</th><th>Updated</th></tr></thead>
           <tbody>
             {proposals.map((p) => (
               <tr key={p.proposalId} className={selected?.proposalId === p.proposalId ? 'selected' : ''} onClick={() => open(p.proposalId)}>
                 <td>
-                  <div className="entry-question strong">{p.action.add.candidate.content.payload.faq.question}</div>
+                  <div className="entry-question strong">{p.action.add.candidate.content.payload.faq?.question || p.action.add.candidate.content.payload.skill?.manifest.name || 'Skill proposal'}</div>
                   <div className="muted small">{p.action.add.target.newEntry?.entryKey || 'no entry key'} · rev {p.proposalRevision}</div>
                 </td>
                 <td>{p.evidenceCount} session{p.evidenceCount === 1 ? '' : 's'}</td>
@@ -443,8 +453,8 @@ function ProposalsInbox({ onChanged, ok, fail, goToFaqs }: PanelProps & { goToFa
       </div>
 
       <div className="registry-detail">
-        {!selected || !edit ? (
-          <div className="empty">Select a proposal to review its evidence, edit the candidate answer and accept it as a draft FAQ.</div>
+        {!selected ? (
+          <div className="empty">Select a proposal to review its candidate and evidence before accepting an unpublished draft.</div>
         ) : (
           <>
             <div className="detail-head">
@@ -456,7 +466,7 @@ function ProposalsInbox({ onChanged, ok, fail, goToFaqs }: PanelProps & { goToFa
               <span className={`pill status-${selected.status}`}>{selected.status}</span>
             </div>
 
-            <form className="editor" onSubmit={(e) => {
+            {edit ? <form className="editor" onSubmit={(e) => {
               e.preventDefault();
               act(() => replaceProposal(selected.proposalId, { expectedProposalRevision: selected.proposalRevision, question: edit.question, answer: edit.answer, entryKey: edit.entryKey || undefined,
                 intents: edit.intents.split(',').map((s) => s.trim()).filter(Boolean).slice(0, 5) }),
@@ -471,7 +481,7 @@ function ProposalsInbox({ onChanged, ok, fail, goToFaqs }: PanelProps & { goToFa
                   <button type="submit" className="ghost-btn small">Save edits</button>
                   <button type="button" className="primary-btn small" onClick={() => act(async () => {
                     const result = await acceptProposal(selected.proposalId, selected.proposalRevision);
-                    setAccepted({ entryId: result.entry.entryId, entryKey: result.entry.entryKey });
+                    setAccepted({ entryId: result.entry.entryId, entryKey: result.entry.entryKey, entryType: 'faq' });
                   }, 'Accepted as an unpublished FAQ draft (v1). Publish it to make it live.')}>Accept as draft FAQ</button>
                   <button type="button" className="warn-btn small" onClick={() => act(() => dismissProposal(selected.proposalId), 'Proposal moved to trash', false).then(() => setSelected(null))}>Dismiss</button>
                 </div>
@@ -489,7 +499,29 @@ function ProposalsInbox({ onChanged, ok, fail, goToFaqs }: PanelProps & { goToFa
                   <button type="button" className="ghost-btn small" onClick={goToFaqs}>Open in FAQs</button>
                 </div>
               )}
-            </form>
+            </form> : (() => {
+              const skill = selected.action.add.candidate.content.payload.skill;
+              if (!skill) return null;
+              return <div className="editor">
+                <p className="muted small">Review the procedure against every evidence item. Replace the candidate through the Playbook API/CLI when needed; before publishing, every action must name a real agent tool and its authorization and failure behavior.</p>
+                <label>Entry key<input value={selected.action.add.target.newEntry?.entryKey || ''} disabled /></label>
+                <label>Name<input value={skill.manifest.name} disabled /></label>
+                <label>Description<textarea rows={3} value={skill.manifest.description} disabled /></label>
+                <label>Draft instructions<textarea rows={16} value={skill.instructions} disabled /></label>
+                {selected.status === 'open' && <div className="editor-actions">
+                  <button type="button" className="primary-btn small" onClick={() => act(async () => {
+                    const result = await acceptProposal(selected.proposalId, selected.proposalRevision);
+                    setAccepted({ entryId: result.entry.entryId, entryKey: result.entry.entryKey, entryType: 'skill' });
+                  }, 'Accepted as an unpublished Skill draft (v1). Review once more before publishing.')}>Accept as draft Skill</button>
+                  <button type="button" className="warn-btn small" onClick={() => act(() => dismissProposal(selected.proposalId), 'Proposal moved to trash', false).then(() => setSelected(null))}>Dismiss</button>
+                </div>}
+                {(selected.status === 'promoted' || accepted) && accepted?.entryType === 'skill' && <div className="accepted-box">
+                  Draft Skill <code>{accepted.entryKey || accepted.entryId}</code> created, not yet published.
+                  <button type="button" className="primary-btn small" onClick={() => act(() => publishSkill(accepted.entryId, 1), 'Published Skill v1', false)}>Publish v1 now</button>
+                  <button type="button" className="ghost-btn small" onClick={goToSkills}>Open in Skills</button>
+                </div>}
+              </div>;
+            })()}
 
             <h4>Evidence from support sessions</h4>
             <div className="evidence-list">
@@ -499,8 +531,8 @@ function ProposalsInbox({ onChanged, ok, fail, goToFaqs }: PanelProps & { goToFa
                     <span className="pill">{item.source.type}</span>
                     <span className="muted small">{fmtDate(item.observedAt)} · {item.producer.name} {item.producer.version}</span>
                   </div>
-                  <div className="evidence-q">“{String(item.source.content?.question || '')}”</div>
-                  <div className="evidence-a">{String(item.source.content?.answerExcerpt || '')}</div>
+                  <div className="evidence-q">“{String(item.source.content?.question || item.source.content?.issue || '')}”</div>
+                  <div className="evidence-a">{String(item.source.content?.answerExcerpt || item.source.content?.resolutionExcerpt || '')}</div>
                   <div className="muted small">session {String(item.source.reference?.sessionId || '')} · answered by {String(item.source.content?.answeredBy || '')}</div>
                 </div>
               ))}
@@ -613,6 +645,7 @@ function Settings({ onChanged, ok, fail }: PanelProps) {
   const [config, setConfig] = useState<PlaybookConfig | null>(null);
   const [form, setForm] = useState({ faqMinimumScore: 0.72, skillMinimumScore: 0.62, maxResults: 6, maxPreviewTokens: '' as string | number });
   const [sessions, setSessions] = useState<SessionRecord[]>([]);
+  const [caseForm, setCaseForm] = useState({ issue: '', resolution: '' });
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(() => {
@@ -665,8 +698,28 @@ function Settings({ onChanged, ok, fail }: PanelProps) {
       </section>
 
       <section className="settings-card">
+        <h2>Learn a procedure from resolved cases</h2>
+        <p className="muted small">Record at least three similar cases resolved by a human, then draft a Skill proposal with OpenAI. The worker redacts common identifiers before generation, attaches every case as evidence, and never publishes automatically. Without a configured OpenAI key, extraction stops and creates nothing.</p>
+        <form className="settings-form" onSubmit={(e) => {
+          e.preventDefault();
+          act(() => recordResolvedCase(caseForm.issue, caseForm.resolution), 'Resolved case recorded as Skill evidence')
+            .then(() => setCaseForm({ issue: '', resolution: '' }));
+        }}>
+          <label>Customer issue<textarea required rows={3} value={caseForm.issue} onChange={(e) => setCaseForm({ ...caseForm, issue: e.target.value })} placeholder="Activation code fails on a replacement TV" /></label>
+          <label>Human-verified resolution<textarea required rows={5} value={caseForm.resolution} onChange={(e) => setCaseForm({ ...caseForm, resolution: e.target.value })} placeholder="Verified the account, removed the retired device, generated a new activation code, and confirmed playback." /></label>
+          <button type="submit" className="ghost-btn" disabled={busy}>Record resolved case</button>
+        </form>
+        <div className="settings-actions">
+          <button className="primary-btn" disabled={busy} onClick={() => act(async () => {
+            const result = await extractSkillProposals();
+            if (!result.proposals.length) throw new Error(`No cluster is ready yet; ${result.minSessions} similar resolved cases are required.`);
+          }, 'Filed learned Skill proposal(s) for human review')}>Draft Skill proposals</button>
+        </div>
+      </section>
+
+      <section className="settings-card">
         <h2>Recent support sessions</h2>
-        <p className="muted small">Sessions answered without an approved FAQ (answered by <code>rag</code>) are evidence for proposals once enough similar ones exist.</p>
+        <p className="muted small">RAG sessions can support FAQ proposals; human-resolved cases can support Skill proposals. Each session is attached to at most one review candidate.</p>
         <table className="entry-table compact">
           <thead><tr><th>When</th><th>Question</th><th>Answered by</th><th>Proposal</th></tr></thead>
           <tbody>

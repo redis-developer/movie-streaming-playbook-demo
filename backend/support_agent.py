@@ -31,7 +31,7 @@ from .fresh_data import StreamFlixSystems, extract_account_id, get_systems
 from .guardrails import OUT_OF_SCOPE_MESSAGE, create_guardrail_router
 from .help_center import HelpCenterEngine, TokenUsage, get_help_engine
 from .playbook import errors, get_playbook, get_vectorizer
-from .session_log import ProposalExtractor, SessionLog
+from .session_log import ProposalExtractor, SessionLog, SkillProposalExtractor
 
 logger = logging.getLogger("support_agent")
 
@@ -328,6 +328,9 @@ class SupportAgent:
         self.openai = self.help.openai_client
         self.skill_runner = SkillRunner(self.playbook, self.systems, self.openai)
         self.extractor = ProposalExtractor(self.sessions, self.playbook, llm_draft=self._llm_draft if self.openai else None)
+        self.skill_extractor = SkillProposalExtractor(
+            self.sessions, self.playbook, llm_draft=self._llm_skill_draft if self.openai else None
+        )
         self.memory = None
         self.memory_hooks = None
         if all(os.getenv(name) for name in (
@@ -360,6 +363,26 @@ class SupportAgent:
                                               "write one canonical FAQ question and one approved-style answer (plain, specific, under 120 words). "
                                               "Return JSON {\"question\": ..., \"answer\": ...}."},
                 {"role": "user", "content": pairs},
+            ],
+        )
+        return json.loads(response.choices[0].message.content or "{}")
+
+    def _llm_skill_draft(self, cluster: List[dict]) -> Dict[str, Any]:
+        cases = "\n\n".join(
+            f"Resolved case {index}:\nIssue: {SkillProposalExtractor._redact(row['question'])[:800]}\n"
+            f"Resolution: {SkillProposalExtractor._redact(row['answer'])[:1200]}"
+            for index, row in enumerate(cluster, 1)
+        )
+        response = self.openai.chat.completions.create(
+            model=LLM_MODEL, temperature=0.1, response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": (
+                    "Draft one review-only StreamFlix support Skill from repeated human-resolved cases. "
+                    "Return JSON with name (lowercase kebab-case), description, instructions (Markdown body), and intents (array). "
+                    "Ground every step in the evidence, redact customer identifiers, never invent tools or policy, and include "
+                    "missing-input, failure, escalation, and completion behavior. The draft will not be published automatically."
+                )},
+                {"role": "user", "content": cases},
             ],
         )
         return json.loads(response.choices[0].message.content or "{}")
