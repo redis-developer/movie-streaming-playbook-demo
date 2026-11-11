@@ -105,6 +105,29 @@ class SessionLog:
             pipe.hset(SESSION_PREFIX + session_id, "proposal_id", proposal_id)
         pipe.execute()
 
+    def resolve(self, session_id: str, resolution: str) -> dict:
+        """Turn an answered conversation into human-verified Skill evidence."""
+        session = self.get(session_id)
+        if session.get("proposal_id"):
+            raise errors.conflict(
+                errors.PROPOSAL_OPEN,
+                "conversation evidence is already attached to a proposal",
+                proposalId=session["proposal_id"],
+            )
+        summary = dict(session.get("summary") or {})
+        summary["resolution"] = {
+            "source": "human-review",
+            "previousAnsweredBy": session.get("answered_by"),
+            "assistantAnswer": session.get("answer", "")[:2000],
+            "resolvedAt": _now(),
+        }
+        self.redis.hset(SESSION_PREFIX + session_id, mapping={
+            "answer": resolution.strip(),
+            "answered_by": "human",
+            "summary": json.dumps(summary),
+        })
+        return self.get(session_id)
+
     def clear(self) -> int:
         keys = list(self.redis.scan_iter(match=SESSION_PREFIX + "*"))
         if keys:
@@ -344,6 +367,13 @@ class SkillProposalExtractor:
         self.sessions.attach_proposal([row["session_id"] for row in cluster], proposal_id)
         return {"proposed": True, "proposalId": proposal_id, "clusterSize": len(cluster),
                 "evidenceAdded": added, "name": key, "generator": draft["generator"]}
+
+    def maybe_propose(self, question: str) -> dict:
+        """Run the worker for the newly resolved conversation's semantic cluster."""
+        cluster = self.sessions.similar_unproposed(question, answered_by="human")
+        if len(cluster) < self.min_sessions:
+            return {"proposed": False, "clusterSize": len(cluster), "needed": self.min_sessions}
+        return self.propose_from_cluster(cluster)
 
     def run_all(self) -> dict:
         pending = [row for row in self.sessions.list(limit=500)

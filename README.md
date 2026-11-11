@@ -95,8 +95,10 @@ conversations. It does not create Skill proposals.
 ### Learned procedures (Skill proposals)
 
 The demo includes an application-owned worker for review-gated procedure learning.
-In **Playbook Studio → Settings**, record at least three similar support cases with
-their human-verified resolutions, then click **Draft Skill proposals**. The worker:
+In the Help Center, mark at least three similar conversations resolved with their
+human-verified resolutions. The application worker runs after each resolution and
+files a proposal as soon as the cluster is ready. The Settings form and **Draft
+Skill proposals** button remain available as a manual rehearsal path. The worker:
 
 1. clusters cases by semantic similarity;
 2. redacts common account, email, and phone identifiers;

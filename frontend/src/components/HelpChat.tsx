@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import { helpChat, type ChatMessage, type ChatResponse, type HelpArticleSource, type TraceStep } from '../api/playbookApi';
+import {
+  helpChat,
+  resolveConversation,
+  type ChatMessage,
+  type ChatResponse,
+  type ConversationResolutionResult,
+  type HelpArticleSource,
+  type TraceStep,
+} from '../api/playbookApi';
 import '../styles/HelpChat.css';
 
 interface HelpChatProps {
@@ -7,9 +15,10 @@ interface HelpChatProps {
   discoveryLimit: number | null;
   pins: string[];
   onResponse?: (response: ChatResponse) => void;
+  onResolved?: (result: ConversationResolutionResult) => void;
 }
 
-export function HelpChat({ suggestions, discoveryLimit, pins, onResponse }: HelpChatProps) {
+export function HelpChat({ suggestions, discoveryLimit, pins, onResponse, onResolved }: HelpChatProps) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -85,7 +94,7 @@ export function HelpChat({ suggestions, discoveryLimit, pins, onResponse }: Help
         ) : (
           <>
             {messages.map((message) => (
-              <MessageBubble key={message.id} message={message} />
+              <MessageBubble key={message.id} message={message} onResolved={onResolved} />
             ))}
             {isLoading && (
               <div className="message assistant loading">
@@ -129,11 +138,32 @@ const BADGES: Record<string, { label: string; className: string; title: string }
   blocked: { label: 'Off-topic', className: 'badge-blocked', title: 'Blocked by the semantic router guardrail.' },
 };
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({ message, onResolved }: { message: ChatMessage; onResolved?: (result: ConversationResolutionResult) => void }) {
   const [showTrace, setShowTrace] = useState(false);
   const [showSources, setShowSources] = useState(false);
+  const [showResolution, setShowResolution] = useState(false);
+  const [resolution, setResolution] = useState('');
+  const [isResolving, setIsResolving] = useState(false);
+  const [resolutionResult, setResolutionResult] = useState<ConversationResolutionResult | null>(null);
+  const [resolutionError, setResolutionError] = useState<string | null>(null);
   const response = message.response;
   const badge = response ? BADGES[response.answered_by] : null;
+
+  const markResolved = async () => {
+    if (!response?.session_id || !resolution.trim() || isResolving) return;
+    setIsResolving(true);
+    setResolutionError(null);
+    try {
+      const result = await resolveConversation(response.session_id, resolution.trim());
+      setResolutionResult(result);
+      setShowResolution(false);
+      onResolved?.(result);
+    } catch (error) {
+      setResolutionError(error instanceof Error ? error.message : 'Could not save the resolution');
+    } finally {
+      setIsResolving(false);
+    }
+  };
 
   return (
     <div className={`message ${message.role}`}>
@@ -166,6 +196,48 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {response?.proposal && !response.proposal.proposed && response.answered_by === 'rag' && (
           <div className="proposal-hint">
             Recorded as evidence ({response.proposal.clusterSize}/{response.proposal.needed} similar sessions before a FAQ is proposed).
+          </div>
+        )}
+
+        {message.role === 'assistant' && response?.session_id && !resolutionResult && (
+          <div className="resolution-review">
+            {!showResolution ? (
+              <button type="button" className="resolve-toggle" onClick={() => setShowResolution(true)}>
+                Mark conversation resolved
+              </button>
+            ) : (
+              <form className="resolution-form" onSubmit={(event) => { event.preventDefault(); markResolved(); }}>
+                <label htmlFor={`resolution-${message.id}`}>Human-verified resolution</label>
+                <textarea
+                  id={`resolution-${message.id}`}
+                  required
+                  rows={4}
+                  value={resolution}
+                  onChange={(event) => setResolution(event.target.value)}
+                  placeholder="Describe the steps that actually resolved this conversation. This becomes evidence for a review-only Skill proposal."
+                  disabled={isResolving}
+                />
+                <div className="resolution-actions">
+                  <button type="submit" className="resolve-submit" disabled={!resolution.trim() || isResolving}>
+                    {isResolving ? 'Running proposal worker…' : 'Save resolution'}
+                  </button>
+                  <button type="button" className="resolve-cancel" onClick={() => setShowResolution(false)} disabled={isResolving}>Cancel</button>
+                </div>
+              </form>
+            )}
+            {resolutionError && <div className="resolution-status failed">{resolutionError}</div>}
+          </div>
+        )}
+
+        {resolutionResult && (
+          <div className={`resolution-status ${resolutionResult.worker.status}`}>
+            {resolutionResult.worker.status === 'proposed' ? (
+              <>Skill proposal <code>{resolutionResult.worker.name || resolutionResult.worker.proposalId}</code> filed from {resolutionResult.worker.clusterSize} resolved conversations with {resolutionResult.worker.evidenceAdded} evidence item(s). Review it in Playbook Studio.</>
+            ) : resolutionResult.worker.status === 'failed' ? (
+              <>Resolution saved, but the proposal worker stopped: {resolutionResult.worker.detail}</>
+            ) : (
+              <>Resolution saved as evidence. The worker found {resolutionResult.worker.clusterSize}/{resolutionResult.worker.needed} similar resolved conversations.</>
+            )}
           </div>
         )}
 

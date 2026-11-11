@@ -704,7 +704,7 @@ function Settings({ onChanged, ok, fail }: PanelProps) {
 
       <section className="settings-card">
         <h2>Learn a procedure from resolved cases</h2>
-        <p className="muted small">Record at least three similar cases resolved by a human, then draft a Skill proposal with OpenAI. The worker redacts common identifiers before generation, attaches every case as evidence, and never publishes automatically. Without a configured OpenAI key, extraction stops and creates nothing.</p>
+        <p className="muted small">The Help Center now runs this automatically when a human marks each conversation resolved. This form remains available for seeding or rehearsing evidence manually. The worker redacts common identifiers, drafts with OpenAI, attaches every case as evidence, and never publishes automatically.</p>
         <form className="settings-form" onSubmit={(e) => {
           e.preventDefault();
           act(() => recordResolvedCase(caseForm.issue, caseForm.resolution), 'Resolved case recorded as Skill evidence')

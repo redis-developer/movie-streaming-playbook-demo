@@ -174,8 +174,8 @@ async def suggestions():
              "steps": ["Ask: What's the status of my refund? My account is SF-48213",
                        "The trace shows discover -> load_skill check-refund-status -> lookup_refund -> fetch only refund-timelines.md"]},
             {"title": "Learn a procedure, review before serving",
-             "steps": ["In Studio > Settings, record three similar cases with their human-verified resolutions",
-                       "Click Draft Skill proposals; the worker clusters cases, redacts common identifiers and attaches the cases as evidence",
+             "steps": ["Ask about the same unresolved procedure in three conversations and mark each answer resolved with the human-verified fix",
+                       "On the third resolution, the agent-side worker clusters the conversations, drafts with OpenAI and files the Skill proposal with evidence",
                        "In Proposals, inspect the Skill instructions and evidence, then Accept as draft Skill",
                        "Publish v1 only after review; until then discovery cannot serve it"]},
             {"title": "One request, two kinds of reuse",
@@ -204,6 +204,40 @@ async def clear_sessions():
 class ResolvedCaseBody(BaseModel):
     issue: str = Field(..., min_length=3, max_length=2048)
     resolution: str = Field(..., min_length=3, max_length=8000)
+
+
+class ConversationResolutionBody(BaseModel):
+    resolution: str = Field(..., min_length=3, max_length=8000)
+
+
+@app.post("/api/help/sessions/{session_id}/resolution", tags=["Help Center"])
+async def resolve_conversation(session_id: str, body: ConversationResolutionBody):
+    """Save a human resolution and let the application worker file a Skill proposal when its cluster is ready."""
+    agent = get_agent()
+    session = agent.sessions.resolve(session_id, body.resolution)
+    try:
+        proposal = agent.skill_extractor.maybe_propose(session["question"])
+        worker = {
+            "status": "proposed" if proposal.get("proposed") else "waiting",
+            **proposal,
+        }
+    except errors.PlaybookError as exc:
+        logger.warning("Resolved conversation %s saved, but Skill proposal worker failed: %s", session_id, exc.detail)
+        worker = {
+            "status": "failed",
+            "proposed": False,
+            "detail": exc.detail,
+            "type": exc.type,
+        }
+    except Exception:
+        logger.exception("Resolved conversation %s saved, but the Skill proposal worker crashed", session_id)
+        worker = {
+            "status": "failed",
+            "proposed": False,
+            "detail": "The resolution was saved, but the proposal worker failed unexpectedly. It remains queued for retry.",
+            "type": "/errors/proposal-worker-failed",
+        }
+    return {"session": session, "worker": worker}
 
 
 @app.post("/api/help/resolved-cases", status_code=201, tags=["Help Center"])

@@ -7,6 +7,7 @@ import {
   patchPlaybookConfig,
   type Account,
   type ChatResponse,
+  type ConversationResolutionResult,
   type HelpStats,
   type Scenario,
 } from '../api/playbookApi';
@@ -70,6 +71,16 @@ export function HelpCenter({ stats, onChanged }: HelpCenterProps) {
     onChanged();
   };
 
+  const handleResolved = (result: ConversationResolutionResult) => {
+    const worker = result.worker;
+    setNotice(worker.status === 'proposed'
+      ? `Skill proposal ${worker.name || worker.proposalId} filed from ${worker.clusterSize} resolved conversations. Review it in Playbook Studio.`
+      : worker.status === 'failed'
+        ? `Resolution saved, but the Skill proposal worker stopped: ${worker.detail}`
+        : `Resolution saved as evidence (${worker.clusterSize}/${worker.needed} similar conversations).`);
+    onChanged();
+  };
+
   const pinList = pins.split(',').map((p) => p.trim()).filter(Boolean);
 
   return (
@@ -125,7 +136,7 @@ export function HelpCenter({ stats, onChanged }: HelpCenterProps) {
 
       <main className="help-main">
         <div className="help-chat-container">
-          <HelpChat suggestions={suggestions} discoveryLimit={discoveryLimit} pins={pinList} onResponse={handleResponse} />
+          <HelpChat suggestions={suggestions} discoveryLimit={discoveryLimit} pins={pinList} onResponse={handleResponse} onResolved={handleResolved} />
 
           <div className="chat-controls">
             <label className="control">

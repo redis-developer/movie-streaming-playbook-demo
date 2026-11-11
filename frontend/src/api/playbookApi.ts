@@ -253,6 +253,24 @@ export interface SessionRecord {
   created_at: string;
 }
 
+export interface SkillProposalWorkerResult {
+  status: 'waiting' | 'proposed' | 'failed';
+  proposed: boolean;
+  proposalId?: string;
+  name?: string;
+  clusterSize?: number;
+  needed?: number;
+  evidenceAdded?: number;
+  generator?: string;
+  detail?: string;
+  type?: string;
+}
+
+export interface ConversationResolutionResult {
+  session: SessionRecord;
+  worker: SkillProposalWorkerResult;
+}
+
 export interface Account {
   accountId: string;
   name: string;
@@ -322,6 +340,8 @@ export const clearSessions = () => post<{ deleted: number }>('/help/sessions/cle
 export const extractProposals = () => post<{ proposals: { proposalId: string; question: string; clusterSize: number }[]; pendingSessions: number; minSessions: number }>('/help/extract');
 export const recordResolvedCase = (issue: string, resolution: string) =>
   post<SessionRecord>('/help/resolved-cases', { issue, resolution });
+export const resolveConversation = (sessionId: string, resolution: string) =>
+  post<ConversationResolutionResult>(`/help/sessions/${sessionId}/resolution`, { resolution });
 export const extractSkillProposals = () => post<{ proposals: { proposalId: string; name: string; clusterSize: number }[]; pendingSessions: number; minSessions: number }>('/help/extract-skills');
 export const listAccounts = () => request<{ accounts: Account[] }>('/accounts');
 
