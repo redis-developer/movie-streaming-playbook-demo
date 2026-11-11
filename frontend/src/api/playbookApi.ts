@@ -116,7 +116,15 @@ export interface ProposalPreview {
       target: { newEntry?: { entryKey?: string } };
       candidate: { content: { payload: {
         faq?: { question: string };
-        skill?: { manifest: SkillContent['manifest']; instructions: string; resources?: ResourceDescriptor[] };
+        // Proposal list responses use a compact Skill preview, while detail
+        // responses return the full Agent Skills document.
+        skill?: {
+          name?: string;
+          description?: string;
+          manifest?: SkillContent['manifest'];
+          instructions?: string;
+          resources?: ResourceDescriptor[];
+        };
       }; metadata?: unknown } };
     };
   };

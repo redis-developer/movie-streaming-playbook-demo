@@ -439,7 +439,12 @@ function ProposalsInbox({ onChanged, ok, fail, goToFaqs, goToSkills }: PanelProp
             {proposals.map((p) => (
               <tr key={p.proposalId} className={selected?.proposalId === p.proposalId ? 'selected' : ''} onClick={() => open(p.proposalId)}>
                 <td>
-                  <div className="entry-question strong">{p.action.add.candidate.content.payload.faq?.question || p.action.add.candidate.content.payload.skill?.manifest.name || 'Skill proposal'}</div>
+                  <div className="entry-question strong">{
+                    p.action.add.candidate.content.payload.faq?.question
+                    || p.action.add.candidate.content.payload.skill?.name
+                    || p.action.add.candidate.content.payload.skill?.manifest?.name
+                    || 'Skill proposal'
+                  }</div>
                   <div className="muted small">{p.action.add.target.newEntry?.entryKey || 'no entry key'} · rev {p.proposalRevision}</div>
                 </td>
                 <td>{p.evidenceCount} session{p.evidenceCount === 1 ? '' : 's'}</td>
