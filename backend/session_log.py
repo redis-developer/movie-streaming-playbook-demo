@@ -105,8 +105,9 @@ class SessionLog:
             pipe.hset(SESSION_PREFIX + session_id, "proposal_id", proposal_id)
         pipe.execute()
 
-    def resolve(self, session_id: str, resolution: str) -> dict:
-        """Turn an answered conversation into human-verified Skill evidence."""
+    def resolve(self, session_id: str, resolution: str, source: str = "human-review",
+                confirmation: str = "") -> dict:
+        """Save verified steps with their resolution signal for Skill evidence."""
         session = self.get(session_id)
         if session.get("proposal_id"):
             raise errors.conflict(
@@ -116,14 +117,15 @@ class SessionLog:
             )
         summary = dict(session.get("summary") or {})
         summary["resolution"] = {
-            "source": "human-review",
+            "source": source,
+            "customerConfirmation": confirmation,
             "previousAnsweredBy": session.get("answered_by"),
             "assistantAnswer": session.get("answer", "")[:2000],
             "resolvedAt": _now(),
         }
         self.redis.hset(SESSION_PREFIX + session_id, mapping={
             "answer": resolution.strip(),
-            "answered_by": "human",
+            "answered_by": "resolved" if source == "customer-confirmation" else "human",
             "summary": json.dumps(summary),
         })
         return self.get(session_id)
@@ -146,7 +148,8 @@ class SessionLog:
             return_fields=["session_id", "question", "answer", "answered_by", "proposal_id", "created_at"],
             return_score=True,
         )
-        query.set_filter(Tag("answered_by") == answered_by)
+        query.set_filter((Tag("answered_by") == "human") | (Tag("answered_by") == "resolved")
+                         if answered_by == "human" else Tag("answered_by") == answered_by)
         rows = self.index.query(query)
         # an empty tag cannot be matched in RediSearch, so unattached sessions are filtered client-side
         return [row for row in rows if not row.get("proposal_id")]
@@ -265,7 +268,7 @@ class ProposalExtractor:
 
 
 class SkillProposalExtractor:
-    """Draft review-only Skill proposals from repeated, human-resolved support cases."""
+    """Draft review-only Skills from customer-confirmed and human-resolved support cases."""
 
     def __init__(self, sessions: SessionLog, playbook,
                  llm_draft: Optional[Callable[[List[dict]], Dict[str, Any]]] = None,
@@ -322,8 +325,8 @@ class SkillProposalExtractor:
             archive.writestr(f"{name}/SKILL.md", skill_md.encode("utf-8"))
         return base64.b64encode(output.getvalue()).decode("ascii")
 
-    @staticmethod
-    def _evidence_source(row: dict) -> dict:
+    def _evidence_source(self, row: dict) -> dict:
+        resolution = self.sessions.get(row["session_id"]).get("summary", {}).get("resolution", {})
         return {
             "type": "resolved_support_case",
             "reference": {"sessionId": row["session_id"], "recordedAt": row.get("created_at")},
@@ -331,6 +334,8 @@ class SkillProposalExtractor:
                 "issue": SkillProposalExtractor._redact(row.get("question") or "")[:600],
                 "resolutionExcerpt": SkillProposalExtractor._redact(row.get("answer") or "")[:800],
                 "answeredBy": row.get("answered_by"),
+                "resolutionSource": resolution.get("source", "human-review"),
+                "customerConfirmation": SkillProposalExtractor._redact(resolution.get("customerConfirmation", ""))[:600],
             },
         }
 
@@ -377,7 +382,7 @@ class SkillProposalExtractor:
 
     def run_all(self) -> dict:
         pending = [row for row in self.sessions.list(limit=500)
-                   if row.get("answered_by") == "human" and not row.get("proposal_id")]
+                   if row.get("answered_by") in ("human", "resolved") and not row.get("proposal_id")]
         proposals, seen = [], set()
         for row in pending:
             if row["session_id"] in seen:

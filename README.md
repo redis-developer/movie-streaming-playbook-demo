@@ -95,8 +95,13 @@ conversations. It does not create Skill proposals.
 ### Learned procedures (Skill proposals)
 
 The demo includes an application-owned worker for review-gated procedure learning.
-In the Help Center, mark at least three similar conversations resolved with their
-human-verified resolutions. The application worker runs after each resolution and
+In the Help Center, ask a procedural question, follow the answer, then confirm in
+chat that it worked (for example, "That worked; the restrictions are enabled").
+OpenAI checks the confirmation against the preceding answer in that same conversation.
+The application captures the original issue, suggested steps, and customer confirmation
+automatically; no resolution form is required. Bare thanks, failure reports, new questions,
+and unconfirmed answers do not qualify. Each pending answer can be confirmed once.
+After at least three similar resolved cases, the application worker
 files a proposal as soon as the cluster is ready. The Settings form and **Draft
 Skill proposals** button remain available as a manual rehearsal path. The worker:
 
@@ -125,7 +130,7 @@ does not file a proposal. There is no deterministic fallback.
 | Skill execution | tool-calling agent (`gpt-4o-mini` by default) follows the instructions, decides which resource to fetch and which live-data tool to call | deterministic runner follows the three seeded Skills the same way (trace shows `offline runner`) |
 | RAG fallback | model writes the answer from the articles | quotes the best help article |
 | FAQ proposal draft | model writes a canonical question and answer from the sessions | the most central session's question and answer |
-| Skill proposal draft | model distills repeated human-resolved cases into review-only instructions | unavailable; no proposal is created without OpenAI |
+| Skill proposal draft | model distills repeated confirmed cases into review-only instructions | unavailable; no proposal is created without OpenAI |
 
 The agent only ever exposes the tools a Skill lists in `allowed-tools`.
 
@@ -192,9 +197,14 @@ they are recorded as evidence for a FAQ proposal instead of being replayed.
 ## API
 
 Chat: `POST /api/help/chat` `{message, discovery_limit?, pins?}` returns the
-answer plus `answered_by`, `trace`, `faq_hits`, `skill_runs`, `discovery` and `proposal`.
-Learned procedures use `POST /api/help/resolved-cases` to record human-verified
-evidence and `POST /api/help/extract-skills` to file review-only Skill proposals.
+answer plus `answered_by`, `trace`, `faq_hits`, `skill_runs`, `discovery`, `proposal`, and `resolution`.
+Use stable `user_id` and `memory_session_id` across the question and success confirmation.
+Confirmed cases return `answered_by: confirmation` and a `resolution.worker` result
+(`waiting`, `proposed`, or `failed`). Confirmation recognition and Skill drafting use
+OpenAI with no deterministic substitute. Redis tracks the pending answer per conversation
+for 24 hours; refreshes retain the browser's session identity.
+The administrative `POST /api/help/resolved-cases` and `POST /api/help/extract-skills`
+endpoints remain available for explicit evidence entry and proposal retries.
 Everything under `/api/playbook/*` mirrors the Playbook data-plane routes
 (`/faqs`, `/skills`, `/{type}/{id}/versions`, `/{type}/{id}/publication`, `/discover`,
 `/proposals`, `/proposals/{id}/evidence`, `/proposals/{id}/acceptance`). Interactive docs:

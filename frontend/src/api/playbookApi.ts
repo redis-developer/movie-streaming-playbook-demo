@@ -188,7 +188,7 @@ export interface TokenUsage {
   total_tokens: number;
 }
 
-export type AnsweredBy = 'faq' | 'skill' | 'mixed' | 'rag' | 'blocked';
+export type AnsweredBy = 'faq' | 'skill' | 'mixed' | 'rag' | 'blocked' | 'confirmation';
 
 export interface SkillRun {
   name: string;
@@ -220,6 +220,7 @@ export interface ChatResponse {
   } | null;
   proposal?: { proposed: boolean; proposalId?: string; clusterSize: number; needed?: number; question?: string } | null;
   session_id?: string | null;
+  resolution?: ConversationResolutionResult | null;
   llm_mode: 'llm' | 'offline';
 }
 

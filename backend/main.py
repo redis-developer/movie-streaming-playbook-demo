@@ -121,6 +121,7 @@ async def help_chat(request: HelpChatRequest):
         "discovery": result.discovery,
         "proposal": result.proposal,
         "session_id": result.session_id,
+        "resolution": result.resolution,
         "llm_mode": result.llm_mode,
     }
 
@@ -143,7 +144,7 @@ async def help_stats():
         "sessions": {
             "total": len(sessions),
             "pending_rag": sum(1 for s in sessions if s.get("answered_by") == "rag" and not s.get("proposal_id")),
-            "pending_resolved_cases": sum(1 for s in sessions if s.get("answered_by") == "human" and not s.get("proposal_id")),
+            "pending_resolved_cases": sum(1 for s in sessions if s.get("answered_by") in ("human", "resolved") and not s.get("proposal_id")),
             "min_for_proposal": EXTRACTION_MIN_SESSIONS,
         },
         "llm_mode": agent.llm_mode,
@@ -174,7 +175,7 @@ async def suggestions():
              "steps": ["Ask: What's the status of my refund? My account is SF-48213",
                        "The trace shows discover -> load_skill check-refund-status -> lookup_refund -> fetch only refund-timelines.md"]},
             {"title": "Learn a procedure, review before serving",
-             "steps": ["Ask about the same unresolved procedure in three conversations and mark each answer resolved with the human-verified fix",
+             "steps": ["Ask about the same procedure in three conversations, then confirm in chat when the steps worked",
                        "On the third resolution, the agent-side worker clusters the conversations, drafts with OpenAI and files the Skill proposal with evidence",
                        "In Proposals, inspect the Skill instructions and evidence, then Accept as draft Skill",
                        "Publish v1 only after review; until then discovery cannot serve it"]},
@@ -213,31 +214,7 @@ class ConversationResolutionBody(BaseModel):
 @app.post("/api/help/sessions/{session_id}/resolution", tags=["Help Center"])
 async def resolve_conversation(session_id: str, body: ConversationResolutionBody):
     """Save a human resolution and let the application worker file a Skill proposal when its cluster is ready."""
-    agent = get_agent()
-    session = agent.sessions.resolve(session_id, body.resolution)
-    try:
-        proposal = agent.skill_extractor.maybe_propose(session["question"])
-        worker = {
-            "status": "proposed" if proposal.get("proposed") else "waiting",
-            **proposal,
-        }
-    except errors.PlaybookError as exc:
-        logger.warning("Resolved conversation %s saved, but Skill proposal worker failed: %s", session_id, exc.detail)
-        worker = {
-            "status": "failed",
-            "proposed": False,
-            "detail": exc.detail,
-            "type": exc.type,
-        }
-    except Exception:
-        logger.exception("Resolved conversation %s saved, but the Skill proposal worker crashed", session_id)
-        worker = {
-            "status": "failed",
-            "proposed": False,
-            "detail": "The resolution was saved, but the proposal worker failed unexpectedly. It remains queued for retry.",
-            "type": "/errors/proposal-worker-failed",
-        }
-    return {"session": session, "worker": worker}
+    return get_agent().resolve_conversation(session_id, body.resolution)
 
 
 @app.post("/api/help/resolved-cases", status_code=201, tags=["Help Center"])
