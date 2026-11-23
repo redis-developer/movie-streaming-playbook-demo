@@ -38,6 +38,20 @@ logger = logging.getLogger("support_agent")
 
 MAX_TOOL_ROUNDS = 8
 
+_QUESTION_OPENERS = re.compile(
+    r"^(what|what's|whats|why|how|when|where|which|who|can|could|would|should|do|does|did|is|are|am|will|"
+    r"i\s+(want|need|forgot|was\s+charged|can't|cannot))\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_new_question(message: str) -> bool:
+    """True when a customer message is a question or request rather than a short success confirmation."""
+    text = message.strip()
+    if "?" in text or len(text.split()) > 14:
+        return True
+    return bool(_QUESTION_OPENERS.match(text))
+
 
 # --------------------------------------------------------------------------- trace
 class Trace:
@@ -421,6 +435,13 @@ class SupportAgent:
             self.redis.delete(key)
             return None
         if previous.get("proposal_id") or previous.get("answered_by") in ("human", "resolved", "blocked"):
+            return None
+        # A success confirmation is a short statement ("that fixed it, thanks"). A new question is
+        # never one, so do not even ask the model: it occasionally says yes to an unrelated question
+        # that follows a Skill run, which swallows the question and misfiles the previous turn as
+        # Skill evidence.
+        if _looks_like_new_question(query):
+            trace.add("resolution_check", "Message is a new question, not a success confirmation", "skip")
             return None
         started = time.time()
         try:
